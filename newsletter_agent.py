@@ -8,9 +8,9 @@ from bs4 import BeautifulSoup
 
 # ── NEWSLETTER CONFIG ─────────────────────────────────────────────────────────
 
-NEWSLETTER_NAME   = "PM Pulse Weekly"
+NEWSLETTER_NAME    = "Scope Creep"
 NEWSLETTER_TAGLINE = "Top 5 product management reads, curated by AI — every Monday."
-ISSUE_NUMBER      = None  # Set to an integer e.g. 1 to override auto-numbering
+ISSUE_NUMBER       = None  # Set to an integer e.g. 1 to override auto-numbering
 
 # ── SOURCES ───────────────────────────────────────────────────────────────────
 
@@ -204,9 +204,12 @@ def fetch_medium(urls: list[str]) -> list[dict]:
                         img = img_tag.get("src") or img_tag.get("data-src")
                 if title and len(title) > 15:
                     articles.append({
-                        "title": title, "link": link,
-                        "summary": "", "source": url,
-                        "image": img, "pool": "Medium",
+                        "title":   title,
+                        "link":    link,
+                        "summary": "",
+                        "source":  url,
+                        "image":   img,
+                        "pool":    "Medium",
                     })
         except Exception as e:
             print(f"  Medium error ({url}): {e}")
@@ -234,9 +237,12 @@ def fetch_blogs(urls: list[str]) -> list[dict]:
                         img = img_tag.get("src") or img_tag.get("data-src")
                 if title and len(title) > 15:
                     articles.append({
-                        "title": title, "link": link,
-                        "summary": "", "source": url,
-                        "image": img, "pool": "Blog",
+                        "title":   title,
+                        "link":    link,
+                        "summary": "",
+                        "source":  url,
+                        "image":   img,
+                        "pool":    "Blog",
                     })
         except Exception as e:
             print(f"  Blog error ({url}): {e}")
@@ -263,13 +269,13 @@ def pick_and_summarise(
         for i, a in enumerate(candidates[:20])
     ])
 
-    prompt = f"""You are the editor of PM Pulse Weekly, a Product Management newsletter for Indian PM professionals.
+    prompt = f"""You are the editor of Scope Creep, a Product Management newsletter for Indian PM professionals.
 
 Source pool: {source_label}
 Today: {datetime.now().strftime('%B %d, %Y')}
 
 From the articles below, pick the SINGLE most valuable one for a PM audience.
-Prioritise: actionable insight, AI in product, career growth, India tech scene. 
+Prioritise: actionable insight, AI in product, career growth, India tech scene.
 Avoid: memes, low-effort posts, generic news.
 
 {numbered}
@@ -309,9 +315,9 @@ SUMMARY:
 
 
 def curate_five(all_pools: dict) -> list[dict]:
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    results   = []
-    picked    = []
+    client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    results = []
+    picked  = []
 
     pools_in_order = [
         ("REDDIT",                         all_pools["reddit"]),
@@ -336,11 +342,10 @@ def curate_five(all_pools: dict) -> list[dict]:
 # ── HTML NEWSLETTER ───────────────────────────────────────────────────────────
 
 def build_newsletter_html(results: list[dict]) -> str:
-    date_str  = datetime.now().strftime("%B %d, %Y")
-    week_num  = datetime.now().isocalendar()[1]
-    issue     = ISSUE_NUMBER or week_num
+    date_str = datetime.now().strftime("%B %d, %Y")
+    week_num = datetime.now().isocalendar()[1]
+    issue    = ISSUE_NUMBER or week_num
 
-    # ── Article cards ────────────────────────────────────────────────────────
     cards = []
     for i, result in enumerate(results):
         article  = result["article"]
@@ -351,8 +356,10 @@ def build_newsletter_html(results: list[dict]) -> str:
         light    = meta["light"]
         emoji    = meta["emoji"]
 
-        summary_match = re.search(r"SUMMARY:\s*\n([\s\S]+?)(?:\n---|\Z)", response)
-        summary = summary_match.group(1).strip() if summary_match else ""
+        summary_match = re.search(
+            r"SUMMARY:\s*\n([\s\S]+?)(?:\n---|\Z)", response
+        )
+        summary      = summary_match.group(1).strip() if summary_match else ""
         summary_html = summary.replace("\n", "<br>")
 
         img_html = ""
@@ -364,15 +371,15 @@ def build_newsletter_html(results: list[dict]) -> str:
                    alt="">
             </div>"""
 
-        divider = '<div style="border-top:1px solid #ebebeb;margin:32px 0;"></div>' \
-                  if i < len(results) - 1 else ""
+        divider = (
+            '<div style="border-top:1px solid #ebebeb;margin:32px 0;"></div>'
+            if i < len(results) - 1 else ""
+        )
 
         cards.append(f"""
-        <!-- Article {i+1} -->
         <div style="margin-bottom:8px;">
-
-          <!-- Number + source row -->
-          <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:14px;">
+          <table width="100%" cellpadding="0" cellspacing="0"
+                 style="margin-bottom:14px;">
             <tr>
               <td>
                 <span style="font-size:11px;font-weight:700;color:#aaa;
@@ -382,7 +389,8 @@ def build_newsletter_html(results: list[dict]) -> str:
               </td>
               <td align="right">
                 <span style="background:{color};color:#fff;font-size:11px;
-                             font-weight:700;padding:3px 10px;border-radius:20px;">
+                             font-weight:700;padding:3px 10px;
+                             border-radius:20px;">
                   {emoji} {pool}
                 </span>
               </td>
@@ -391,24 +399,22 @@ def build_newsletter_html(results: list[dict]) -> str:
 
           {img_html}
 
-          <!-- Title -->
-          <h2 style="margin:0 0 6px;font-size:20px;line-height:1.3;font-weight:700;">
+          <h2 style="margin:0 0 6px;font-size:20px;line-height:1.3;
+                     font-weight:700;">
             <a href="{article['link']}"
                style="color:#111111;text-decoration:none;"
                target="_blank">{article['title']}</a>
           </h2>
 
-          <!-- Source -->
           <p style="margin:0 0 14px;font-size:12px;color:#999;">
             {article['source']}
           </p>
 
-          <!-- Summary -->
-          <p style="margin:0 0 18px;font-size:15px;line-height:1.75;color:#444;">
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.75;
+                    color:#444;">
             {summary_html}
           </p>
 
-          <!-- CTA button -->
           <a href="{article['link']}"
              style="display:inline-block;background:{color};color:#ffffff;
                     font-size:13px;font-weight:600;padding:10px 22px;
@@ -416,13 +422,11 @@ def build_newsletter_html(results: list[dict]) -> str:
              target="_blank">
             Read Full Article →
           </a>
-
         </div>
         {divider}""")
 
     cards_html = "\n".join(cards)
 
-    # ── Source pills ─────────────────────────────────────────────────────────
     pills = "".join([
         f'<span style="display:inline-block;background:'
         f'{POOL_META.get(r["article"].get("pool","Unknown"),POOL_META["Unknown"])["color"]};'
@@ -446,10 +450,10 @@ def build_newsletter_html(results: list[dict]) -> str:
 
 <div style="max-width:620px;margin:0 auto;padding:32px 16px;">
 
-  <!-- ── HEADER ── -->
-  <div style="background:linear-gradient(135deg,#0f2a4a 0%,#1a5276 60%,#0077b5 100%);
-              border-radius:16px;padding:40px 36px;margin-bottom:24px;
-              text-align:center;">
+  <!-- HEADER -->
+  <div style="background:linear-gradient(135deg,#0f2a4a 0%,#1a5276 60%,
+              #0077b5 100%);border-radius:16px;padding:40px 36px;
+              margin-bottom:24px;text-align:center;">
     <p style="margin:0 0 6px;color:#7ec8e3;font-size:12px;font-weight:700;
                text-transform:uppercase;letter-spacing:2px;">
       Issue #{issue} &nbsp;·&nbsp; {date_str}
@@ -463,7 +467,7 @@ def build_newsletter_html(results: list[dict]) -> str:
     </p>
   </div>
 
-  <!-- ── INTRO STRIP ── -->
+  <!-- SOURCE PILLS -->
   <div style="background:#ffffff;border-radius:12px;padding:20px 24px;
               margin-bottom:24px;border:1px solid #e5e7eb;">
     <p style="margin:0 0 10px;font-size:13px;font-weight:700;color:#888;
@@ -473,22 +477,20 @@ def build_newsletter_html(results: list[dict]) -> str:
     <div>{pills}</div>
   </div>
 
-  <!-- ── MAIN CARD ── -->
+  <!-- MAIN CARD -->
   <div style="background:#ffffff;border-radius:16px;padding:36px 32px;
               border:1px solid #e5e7eb;
               box-shadow:0 4px 24px rgba(0,0,0,0.06);">
-
     {cards_html}
-
   </div>
 
-  <!-- ── FOOTER ── -->
+  <!-- FOOTER -->
   <div style="text-align:center;padding:28px 0 8px;">
     <p style="color:#aaa;font-size:12px;margin:0 0 4px;">
       You're receiving this because you subscribed to {NEWSLETTER_NAME}.
     </p>
     <p style="color:#bbb;font-size:11px;margin:0;">
-      Curated by AI &nbsp;·&nbsp; Powered by Claude Haiku &amp; Beehiiv
+      Curated by AI &nbsp;·&nbsp; Powered by Claude Haiku &amp; Buttondown
       &nbsp;·&nbsp; Built on GitHub Actions
     </p>
   </div>
@@ -498,47 +500,41 @@ def build_newsletter_html(results: list[dict]) -> str:
 </html>"""
 
 
-# ── BEEHIIV ───────────────────────────────────────────────────────────────────
+# ── BUTTONDOWN ────────────────────────────────────────────────────────────────
 
-def send_to_beehiiv(html: str, results: list[dict]):
-    api_key = os.environ["BEEHIIV_API_KEY"]
-    pub_id  = os.environ["BEEHIIV_PUBLICATION_ID"]
-    week    = datetime.now().isocalendar()[1]
-    issue   = ISSUE_NUMBER or week
+def send_to_buttondown(html: str, results: list[dict]):
+    api_key  = os.environ["BUTTONDOWN_API_KEY"]
+    week     = datetime.now().isocalendar()[1]
+    issue    = ISSUE_NUMBER or week
     date_str = datetime.now().strftime("%B %d, %Y")
 
-    subject  = f"{NEWSLETTER_NAME} #{issue} — Top {len(results)} PM Reads | {date_str}"
-    preview  = " · ".join([r["article"]["title"][:40] for r in results[:3]])
-
-    payload = {
-        "title":        f"{NEWSLETTER_NAME} #{issue} — {date_str}",
-        "subject":      subject,
-        "preview_text": preview,
-        "content_tags": ["product-management", "AI", "weekly"],
-        "status":       "draft",
-        "free_content": html,
-    }
+    subject = (
+        f"{NEWSLETTER_NAME} #{issue} — "
+        f"Top {len(results)} PM Reads | {date_str}"
+    )
 
     resp = requests.post(
-        f"https://api.beehiiv.com/v2/publications/{pub_id}/posts",
+        "https://api.buttondown.email/v1/emails",
         headers={
-            "Authorization":  f"Bearer {api_key}",
-            "Content-Type":   "application/json",
-            "Accept":         "application/json",
+            "Authorization": f"Token {api_key}",
+            "Content-Type":  "application/json",
         },
-        json=payload,
+        json={
+            "subject": subject,
+            "body":    html,
+            "status":  "draft",
+        },
         timeout=30,
     )
 
     if resp.status_code in (200, 201):
-        data = resp.json().get("data", {})
-        print(f"  Draft created in Beehiiv!")
-        print(f"  Post ID : {data.get('id')}")
-        print(f"  Subject : {subject}")
-        print(f"  Status  : {data.get('status')}")
-        print(f"  Review and send from your Beehiiv dashboard.")
+        data = resp.json()
+        print(f"  Draft created in Buttondown!")
+        print(f"  Email ID : {data.get('id')}")
+        print(f"  Subject  : {subject}")
+        print(f"  Go to buttondown.com/emails to review and send.")
     else:
-        print(f"  Beehiiv API error {resp.status_code}: {resp.text}")
+        print(f"  Buttondown API error {resp.status_code}: {resp.text}")
         raise SystemExit(1)
 
 
@@ -548,19 +544,23 @@ def main():
     print("Step 1/3 — Fetching all sources...")
 
     reddit = fetch_rss(REDDIT_FEEDS)
-    for a in reddit: a["pool"] = "Reddit"
+    for a in reddit:
+        a["pool"] = "Reddit"
     print(f"  Reddit: {len(reddit)}")
 
     google = fetch_rss(GOOGLE_NEWS_FEEDS, max_age_hours=168)
-    for a in google: a["pool"] = "Google News"
+    for a in google:
+        a["pool"] = "Google News"
     print(f"  Google News: {len(google)}")
 
     linkedin = fetch_rss(LINKEDIN_RSS_FEEDS)
-    for a in linkedin: a["pool"] = "LinkedIn"
+    for a in linkedin:
+        a["pool"] = "LinkedIn"
     print(f"  LinkedIn RSS: {len(linkedin)}")
 
     pinterest = fetch_rss(PINTEREST_RSS_FEEDS)
-    for a in pinterest: a["pool"] = "Pinterest"
+    for a in pinterest:
+        a["pool"] = "Pinterest"
     print(f"  Pinterest RSS: {len(pinterest)}")
 
     youtube = fetch_youtube(YOUTUBE_HANDLES)
@@ -572,7 +572,9 @@ def main():
     blogs = fetch_blogs(BLOG_URLS)
     print(f"  Blogs: {len(blogs)}")
 
-    all_articles = reddit + google + linkedin + pinterest + youtube + medium + blogs
+    all_articles = (
+        reddit + google + linkedin + pinterest + youtube + medium + blogs
+    )
     print(f"  Total: {len(all_articles)} articles collected")
 
     print("\nStep 2/3 — Claude Haiku: curating top 5...")
@@ -585,9 +587,9 @@ def main():
     })
     print(f"  {len(results)} articles selected")
 
-    print("\nStep 3/3 — Building newsletter and sending to Beehiiv...")
+    print("\nStep 3/3 — Building newsletter and sending to Buttondown...")
     html = build_newsletter_html(results)
-    send_to_beehiiv(html, results)
+    send_to_buttondown(html, results)
     print("\nDone!")
 
 
