@@ -511,6 +511,7 @@ def send_to_beehiiv(html: str, results: list[dict]):
     preview  = " · ".join([r["article"]["title"][:40] for r in results[:3]])
 
     payload = {
+        "title":        f"{NEWSLETTER_NAME} #{issue} — {date_str}",
         "subject":      subject,
         "preview_text": preview,
         "content_tags": ["product-management", "AI", "weekly"],
