@@ -24,6 +24,5 @@ jobs:
       - name: Run newsletter agent
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BEEHIIV_API_KEY: ${{ secrets.BEEHIIV_API_KEY }}
-          BEEHIIV_PUBLICATION_ID: ${{ secrets.BEEHIIV_PUBLICATION_ID }}
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
         run: python newsletter_agent.py
