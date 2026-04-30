@@ -1,9 +1,29 @@
-# Newsletter workflow — to be configured in Step 5
 name: Weekly PM Newsletter
+
 on:
+  schedule:
+    - cron: "30 2 * * 1"
   workflow_dispatch:
+
 jobs:
-  placeholder:
+  send-newsletter:
     runs-on: ubuntu-latest
+
     steps:
-      - run: echo "placeholder"
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run newsletter agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BEEHIIV_API_KEY: ${{ secrets.BEEHIIV_API_KEY }}
+          BEEHIIV_PUBLICATION_ID: ${{ secrets.BEEHIIV_PUBLICATION_ID }}
+        run: python newsletter_agent.py
