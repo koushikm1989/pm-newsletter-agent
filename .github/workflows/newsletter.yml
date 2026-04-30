@@ -1,0 +1,9 @@
+# Newsletter workflow — to be configured in Step 5
+name: Weekly PM Newsletter
+on:
+  workflow_dispatch:
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "placeholder"
