@@ -3,6 +3,7 @@ import anthropic
 import requests
 import os
 import re
+import time
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
@@ -10,7 +11,7 @@ from bs4 import BeautifulSoup
 
 NEWSLETTER_NAME    = "Scope Creep"
 NEWSLETTER_TAGLINE = "Top 5 product management reads, curated by AI — every Monday."
-START_DATE         = datetime(2026, 4, 30)  # Issue #1 date — update this once
+START_DATE         = datetime(2026, 4, 30)
 
 def get_issue_number() -> int:
     weeks_since_start = ((datetime.now() - START_DATE).days // 7) + 1
@@ -287,7 +288,7 @@ Why picked: [one sentence]
 SUMMARY:
 [4-5 sentence newsletter summary paragraph]"""
 
-     import time
+    message = None
     for attempt in range(3):
         try:
             message = client.messages.create(
@@ -509,8 +510,6 @@ def build_newsletter_html(results: list[dict]) -> str:
         <tr>
           <td style="border-radius:20px;overflow:hidden;
                      background:#0f3460;">
-
-            <!-- Rainbow top bar -->
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
                 <td width="33%" style="background:#e94560;
@@ -521,7 +520,6 @@ def build_newsletter_html(results: list[dict]) -> str:
                     height:5px;font-size:1px;line-height:1px;">&nbsp;</td>
               </tr>
             </table>
-
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
                 <td style="padding:36px 36px 32px;text-align:center;">
@@ -591,8 +589,7 @@ def build_newsletter_html(results: list[dict]) -> str:
                        margin:0 0 10px 0;font-size:15px;
                        line-height:1.7;color:#222222;
                        font-weight:700;">
-              Hey there! Welcome to this week's edition of
-              Scope Creep.
+              Hey there! Welcome to this week's edition of Scope Creep.
             </p>
             <p style="font-family:Arial,sans-serif;
                        margin:0;font-size:14px;
