@@ -2,7 +2,7 @@ name: Weekly PM Newsletter
 
 on:
   schedule:
-    - cron: "0 4 * * *"
+    - cron: "30 4 * * 1"
   workflow_dispatch:
 
 jobs:
