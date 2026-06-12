@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 NEWSLETTER_NAME    = "Scope Creep"
 NEWSLETTER_TAGLINE = "Top 5 product management reads, curated by AI — every Monday."
 START_DATE         = datetime(2026, 4, 30)
+LINKEDIN_URL       = "https://www.linkedin.com/in/mukherjee-koushik/"
 
 def get_issue_number() -> int:
     weeks_since_start = ((datetime.now() - START_DATE).days // 7) + 1
@@ -71,16 +72,17 @@ YOUTUBE_HANDLES = [
 ]
 
 # ── POOL METADATA ─────────────────────────────────────────────────────────────
+# Brand-accurate accent colors. Each card glows in its source's color.
 
 POOL_META = {
-    "Reddit":      {"color": "#ff4500", "emoji": "👾", "bg": "#fff3f0", "border": "#ffb89a"},
-    "Google News": {"color": "#1a73e8", "emoji": "📰", "bg": "#f0f5ff", "border": "#a8c4f8"},
-    "Medium":      {"color": "#292929", "emoji": "✍️", "bg": "#f7f7f7", "border": "#cccccc"},
-    "Blog":        {"color": "#0f5bbf", "emoji": "📝", "bg": "#eef4ff", "border": "#93bbf5"},
-    "LinkedIn":    {"color": "#0077b5", "emoji": "💼", "bg": "#eef7fc", "border": "#7ec8e3"},
-    "Pinterest":   {"color": "#ad081b", "emoji": "📌", "bg": "#fff0f1", "border": "#f5a0a8"},
-    "YouTube":     {"color": "#cc0000", "emoji": "▶️", "bg": "#fff2f2", "border": "#ffaaaa"},
-    "Unknown":     {"color": "#444444", "emoji": "🔗", "bg": "#f5f5f5", "border": "#cccccc"},
+    "Reddit":      {"color": "#ff4500", "emoji": "👾"},
+    "Google News": {"color": "#4285f4", "emoji": "📰"},
+    "Medium":      {"color": "#1a8917", "emoji": "✍️"},
+    "Blog":        {"color": "#d97706", "emoji": "📝"},
+    "LinkedIn":    {"color": "#0a66c2", "emoji": "💼"},
+    "Pinterest":   {"color": "#e60023", "emoji": "📌"},
+    "YouTube":     {"color": "#ff0033", "emoji": "▶️"},
+    "Unknown":     {"color": "#7f8ca3", "emoji": "🔗"},
 }
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -341,19 +343,93 @@ def curate_five(all_pools: dict) -> list[dict]:
 
 
 # ── HTML NEWSLETTER ───────────────────────────────────────────────────────────
+#
+# Design system — "Aurora Editorial"
+#   Void      #0d0d22  email body background
+#   Panel     #15153a  hero / footer / index surfaces
+#   Card      #181840  article card surface
+#   Coral     #e94560  primary accent
+#   Violet    #533483  secondary accent
+#   Sky       #a8d8ea  tagline / soft text
+#   Slate     #8e96c4  muted text
+#   Per-card accents come from POOL_META (brand colors of each source).
+#
+# Signature element: the "aurora seam" — a segmented coral→violet→navy
+# strip that opens the issue and recurs as a divider. It encodes the idea
+# of many sources blending into one curated stream.
+#
+# Type: Arial Black masthead, Trebuchet MS headings/labels, Georgia body
+# (all email-safe; Georgia gives the summaries an editorial, legible feel).
+
+AURORA = ["#e94560", "#ef4e74", "#a23e88", "#533483", "#2c4a78", "#0f3460"]
+
+SECTION_LABELS = [
+    "Top Pick",
+    "In the News",
+    "Watch &amp; Learn",
+    "Deep Read",
+    "Wildcard",
+]
+SECTION_EMOJI = ["🔥", "📡", "🎬", "📖", "💡"]
+
+
+def aurora_seam(height: int = 5, radius: str = "") -> str:
+    """Segmented gradient strip — the issue's signature element."""
+    cells = "".join(
+        f'<td width="{100 // len(AURORA)}%" bgcolor="{c}" '
+        f'style="background:{c};height:{height}px;font-size:1px;'
+        f'line-height:1px;">&nbsp;</td>'
+        for c in AURORA
+    )
+    return (
+        f'<table width="100%" cellpadding="0" cellspacing="0" '
+        f'style="{radius}"><tr>{cells}</tr></table>'
+    )
+
 
 def build_newsletter_html(results: list[dict]) -> str:
     date_str = datetime.now().strftime("%B %d, %Y")
     issue    = get_issue_number()
 
-    section_labels = [
-        "🔥 Top Pick",
-        "📡 In the News",
-        "🎬 Watch & Learn",
-        "📖 Deep Read",
-        "💡 Wildcard",
-    ]
+    # ── Hidden preheader (inbox preview text) ────────────────────────────
+    first_title = results[0]["article"]["title"] if results else ""
+    preheader = (
+        f"This week: {first_title} + {max(0, len(results) - 1)} more "
+        f"hand-picked PM reads."
+    )
 
+    # ── "In this issue" index ────────────────────────────────────────────
+    index_rows = []
+    for i, result in enumerate(results):
+        article = result["article"]
+        pool    = article.get("pool", "Unknown")
+        meta    = POOL_META.get(pool, POOL_META["Unknown"])
+        label   = SECTION_LABELS[i] if i < len(SECTION_LABELS) else f"#{i+1}"
+        index_rows.append(f"""
+        <tr>
+          <td width="36" valign="top" style="padding:0 0 14px 0;">
+            <span style="font-family:'Trebuchet MS',Arial,sans-serif;
+                         display:inline-block;width:26px;height:26px;
+                         line-height:26px;text-align:center;
+                         background:{meta['color']};color:#ffffff;
+                         font-size:13px;font-weight:bold;
+                         border-radius:13px;">{i+1}</span>
+          </td>
+          <td valign="top" style="padding:2px 0 14px 0;">
+            <a href="{article['link']}" target="_blank"
+               style="font-family:'Trebuchet MS',Arial,sans-serif;
+                      color:#ffffff;font-size:15px;font-weight:bold;
+                      line-height:1.45;text-decoration:none;">
+              {article['title']}</a>
+            <span style="font-family:'Trebuchet MS',Arial,sans-serif;
+                         color:{meta['color']};font-size:12px;
+                         font-weight:bold;">
+              &nbsp;&middot;&nbsp;{label}</span>
+          </td>
+        </tr>""")
+    index_html = "\n".join(index_rows)
+
+    # ── Article cards ────────────────────────────────────────────────────
     cards = []
     for i, result in enumerate(results):
         article  = result["article"]
@@ -361,47 +437,51 @@ def build_newsletter_html(results: list[dict]) -> str:
         pool     = article.get("pool", "Unknown")
         meta     = POOL_META.get(pool, POOL_META["Unknown"])
         color    = meta["color"]
-        bg       = meta["bg"]
-        border   = meta["border"]
         emoji    = meta["emoji"]
-        label    = section_labels[i] if i < len(section_labels) else f"#{i+1}"
+        label    = SECTION_LABELS[i] if i < len(SECTION_LABELS) else f"#{i+1}"
+        s_emoji  = SECTION_EMOJI[i] if i < len(SECTION_EMOJI) else "•"
 
         summary_match = re.search(r"SUMMARY:\s*\n([\s\S]+?)(?:\n---|\Z)", response)
         summary       = summary_match.group(1).strip() if summary_match else ""
         summary_html  = summary.replace("\n", "<br>")
 
+        # Prettify URL-style sources (e.g. Medium feeds) into clean labels
+        source_label = article["source"]
+        if source_label.startswith("http"):
+            source_label = re.sub(r"^https?://(www\.)?", "", source_label).rstrip("/")
+
         img_html = ""
         if article.get("image"):
             img_html = f"""
-            <tr>
-              <td style="padding:0 0 20px 0;line-height:0;">
-                <img src="{article['image']}"
-                     width="100%"
-                     style="display:block;width:100%;max-height:220px;
-                            object-fit:cover;border-radius:8px;"
-                     alt="">
-              </td>
-            </tr>"""
+        <tr>
+          <td style="line-height:0;font-size:0;">
+            <a href="{article['link']}" target="_blank" style="display:block;">
+              <img src="{article['image']}" width="680"
+                   style="display:block;width:100%;height:300px;
+                          object-fit:cover;border:0;" alt="">
+            </a>
+          </td>
+        </tr>"""
 
         cards.append(f"""
-<table width="100%" cellpadding="0" cellspacing="0"
-       style="margin-bottom:24px;border-radius:16px;
-              overflow:hidden;border:2px solid {border};">
+<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#181840"
+       style="margin-bottom:32px;border-radius:18px;overflow:hidden;
+              background:#181840;border:1px solid {color};">
+  {img_html}
   <tr>
-    <td style="background:{color};padding:12px 20px;">
+    <td bgcolor="{color}" style="background:{color};padding:14px 28px;">
       <table width="100%" cellpadding="0" cellspacing="0">
         <tr>
-          <td style="font-family:Arial,sans-serif;color:#ffffff;
-                     font-size:13px;font-weight:700;
-                     letter-spacing:0.5px;">
-            {label}
+          <td style="font-family:'Trebuchet MS',Arial,sans-serif;
+                     color:#ffffff;font-size:15px;font-weight:bold;
+                     letter-spacing:1px;text-transform:uppercase;">
+            {s_emoji} &nbsp;{i+1} / {len(results)} &mdash; {label}
           </td>
           <td align="right">
-            <span style="font-family:Arial,sans-serif;
-                         background:rgba(255,255,255,0.22);
-                         color:#ffffff;font-size:11px;
-                         font-weight:700;padding:3px 10px;
-                         border-radius:20px;">
+            <span style="font-family:'Trebuchet MS',Arial,sans-serif;
+                         background:#0d0d22;color:#ffffff;
+                         font-size:11px;font-weight:bold;
+                         padding:4px 12px;border-radius:20px;">
               {emoji} {pool}
             </span>
           </td>
@@ -410,66 +490,49 @@ def build_newsletter_html(results: list[dict]) -> str:
     </td>
   </tr>
   <tr>
-    <td style="background:{bg};padding:24px;">
+    <td style="padding:30px 30px 32px;">
       <table width="100%" cellpadding="0" cellspacing="0">
-        {img_html}
         <tr>
-          <td style="padding-bottom:10px;">
-            <h2 style="font-family:Arial,sans-serif;margin:0;
-                       font-size:18px;line-height:1.35;
-                       font-weight:800;color:#111111;">
-              <a href="{article['link']}"
-                 style="color:#111111;text-decoration:none;"
-                 target="_blank">{article['title']}</a>
+          <td style="padding-bottom:12px;">
+            <h2 style="font-family:'Trebuchet MS',Arial,sans-serif;
+                       margin:0;font-size:24px;line-height:1.3;
+                       font-weight:bold;color:#ffffff;">
+              <a href="{article['link']}" target="_blank"
+                 style="color:#ffffff;text-decoration:none;">
+                {article['title']}</a>
             </h2>
           </td>
         </tr>
         <tr>
-          <td style="padding-bottom:16px;">
-            <span style="font-family:Arial,sans-serif;
-                         display:inline-block;
-                         background:{color};
-                         color:#ffffff;
-                         font-size:10px;font-weight:700;
-                         padding:3px 10px;border-radius:4px;
-                         letter-spacing:0.5px;
-                         text-transform:uppercase;">
-              {article['source'][:55]}
+          <td style="padding-bottom:20px;">
+            <span style="font-family:'Trebuchet MS',Arial,sans-serif;
+                         color:{color};font-size:12px;font-weight:bold;
+                         letter-spacing:0.8px;text-transform:uppercase;">
+              {source_label[:55]}
             </span>
           </td>
         </tr>
         <tr>
-          <td style="padding-bottom:20px;
-                     border-left:4px solid {color};
-                     padding-left:14px;">
-            <p style="font-family:Arial,sans-serif;
-                      margin:0;font-size:14px;
-                      line-height:1.8;color:#333333;">
+          <td style="padding-bottom:26px;border-left:4px solid {color};
+                     padding-left:18px;">
+            <p style="font-family:Georgia,'Times New Roman',serif;
+                      margin:0;font-size:16px;line-height:1.85;
+                      color:#cdd3f0;">
               {summary_html}
             </p>
           </td>
         </tr>
         <tr>
-          <td>
-            <table cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="background:{color};
-                           border-radius:8px;">
-                  <a href="{article['link']}"
-                     target="_blank"
-                     style="font-family:Arial,sans-serif;
-                            display:inline-block;
-                            color:#ffffff !important;
-                            font-size:13px;font-weight:700;
-                            padding:12px 24px;
-                            text-decoration:none;
-                            border-radius:8px;
-                            mso-padding-alt:0;">
-                    Read Full Article &rarr;
-                  </a>
-                </td>
-              </tr>
-            </table>
+          <td bgcolor="{color}" style="background:{color};
+                     border-radius:10px;text-align:center;">
+            <a href="{article['link']}" target="_blank"
+               style="font-family:'Trebuchet MS',Arial,sans-serif;
+                      display:block;color:#ffffff !important;
+                      font-size:15px;font-weight:bold;
+                      padding:15px 24px;text-decoration:none;
+                      border-radius:10px;mso-padding-alt:0;">
+              {('Watch the video' if pool == 'YouTube' else 'Read the full piece')} &rarr;
+            </a>
           </td>
         </tr>
       </table>
@@ -480,11 +543,11 @@ def build_newsletter_html(results: list[dict]) -> str:
     cards_html = "\n".join(cards)
 
     pills = "".join([
-        f'<span style="font-family:Arial,sans-serif;'
+        f'<span style="font-family:\'Trebuchet MS\',Arial,sans-serif;'
         f'display:inline-block;'
         f'background:{POOL_META.get(r["article"].get("pool","Unknown"),POOL_META["Unknown"])["color"]};'
-        f'color:#ffffff;font-size:11px;font-weight:700;'
-        f'padding:4px 12px;border-radius:20px;margin:3px 4px;">'
+        f'color:#ffffff;font-size:12px;font-weight:bold;'
+        f'padding:5px 14px;border-radius:20px;margin:3px 4px;">'
         f'{POOL_META.get(r["article"].get("pool","Unknown"),POOL_META["Unknown"])["emoji"]} '
         f'{r["article"].get("pool","Unknown")}</span>'
         for r in results
@@ -495,113 +558,118 @@ def build_newsletter_html(results: list[dict]) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
 <title>{NEWSLETTER_NAME} — Issue #{issue}</title>
 </head>
-<body style="margin:0;padding:0;background:#1a1a2e;">
+<body style="margin:0;padding:0;background:#0d0d22;" bgcolor="#0d0d22">
 
-<table width="100%" cellpadding="0" cellspacing="0"
-       style="background:#1a1a2e;">
+<!-- Preheader: shows in inbox preview, invisible in the email body -->
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;
+            font-size:1px;line-height:1px;color:#0d0d22;">
+  {preheader}
+</div>
+
+<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#0d0d22"
+       style="background:#0d0d22;">
   <tr>
-    <td align="center" style="padding:32px 16px;">
+    <td align="center" style="padding:28px 12px;">
       <table width="100%" cellpadding="0" cellspacing="0"
-             style="max-width:620px;">
+             style="max-width:680px;">
 
-        <!-- ══ HEADER ══ -->
+        <!-- ══ HERO ══ -->
         <tr>
-          <td style="border-radius:20px;overflow:hidden;
-                     background:#0f3460;">
-            <table width="100%" cellpadding="0" cellspacing="0">
+          <td style="border-radius:22px;overflow:hidden;">
+            {aurora_seam(height=6)}
+            <table width="100%" cellpadding="0" cellspacing="0"
+                   bgcolor="#15153a" style="background:#15153a;">
               <tr>
-                <td width="33%" style="background:#e94560;
-                    height:5px;font-size:1px;line-height:1px;">&nbsp;</td>
-                <td width="34%" style="background:#533483;
-                    height:5px;font-size:1px;line-height:1px;">&nbsp;</td>
-                <td width="33%" style="background:#0f3460;
-                    height:5px;font-size:1px;line-height:1px;">&nbsp;</td>
-              </tr>
-            </table>
-            <table width="100%" cellpadding="0" cellspacing="0">
-              <tr>
-                <td style="padding:36px 36px 32px;text-align:center;">
-                  <p style="font-family:Arial,sans-serif;
-                             margin:0 0 8px 0;color:#e94560;
-                             font-size:11px;font-weight:800;
-                             text-transform:uppercase;
-                             letter-spacing:3px;">
+                <td style="padding:44px 36px 40px;text-align:center;">
+                  <span style="font-family:'Trebuchet MS',Arial,sans-serif;
+                               display:inline-block;
+                               border:1px solid #e94560;color:#e94560;
+                               font-size:12px;font-weight:bold;
+                               letter-spacing:3px;text-transform:uppercase;
+                               padding:6px 18px;border-radius:20px;
+                               margin-bottom:20px;">
                     Issue #{issue} &nbsp;&middot;&nbsp; {date_str}
-                  </p>
-                  <h1 style="font-family:Arial,sans-serif;
-                             margin:0 0 10px 0;color:#ffffff;
-                             font-size:42px;font-weight:900;
-                             letter-spacing:-1px;line-height:1;">
+                  </span>
+                  <h1 style="font-family:'Arial Black','Trebuchet MS',Arial,sans-serif;
+                             margin:0 0 14px 0;color:#ffffff;
+                             font-size:52px;font-weight:900;
+                             letter-spacing:-1px;line-height:1.05;">
                     {NEWSLETTER_NAME}
                   </h1>
-                  <p style="font-family:Arial,sans-serif;
-                             margin:0 0 20px 0;color:#a8d8ea;
-                             font-size:14px;line-height:1.6;">
+                  <p style="font-family:Georgia,'Times New Roman',serif;
+                            font-style:italic;
+                            margin:0 0 24px 0;color:#a8d8ea;
+                            font-size:16px;line-height:1.6;">
                     {NEWSLETTER_TAGLINE}
                   </p>
-                  <table width="60" cellpadding="0" cellspacing="0"
-                         align="center" style="margin:0 auto 20px;">
-                    <tr>
-                      <td style="background:#e94560;height:3px;
-                                 border-radius:2px;font-size:1px;
-                                 line-height:1px;">&nbsp;</td>
-                    </tr>
-                  </table>
-                  <p style="font-family:Arial,sans-serif;
-                             margin:0;color:#8892b0;font-size:12px;">
-                    Curated from Reddit &middot; Google News &middot;
-                    YouTube &middot; LinkedIn &middot; Pinterest &middot;
-                    Medium &middot; PM Blogs
+                  <p style="font-family:'Trebuchet MS',Arial,sans-serif;
+                            margin:0;color:#8e96c4;font-size:12px;
+                            letter-spacing:0.5px;">
+                    Reddit &middot; Google News &middot; YouTube &middot;
+                    LinkedIn &middot; Pinterest &middot; Medium &middot;
+                    PM Blogs &mdash; one inbox.
                   </p>
                 </td>
               </tr>
             </table>
+            {aurora_seam(height=6)}
           </td>
         </tr>
 
-        <tr><td style="height:20px;">&nbsp;</td></tr>
+        <tr><td style="height:26px;font-size:1px;">&nbsp;</td></tr>
 
-        <!-- ══ THIS WEEK'S SOURCES ══ -->
+        <!-- ══ IN THIS ISSUE ══ -->
         <tr>
-          <td style="background:#16213e;border-radius:14px;
-                     padding:18px 24px;border:1px solid #0f3460;">
-            <p style="font-family:Arial,sans-serif;
-                       margin:0 0 10px 0;color:#a8b2d8;
-                       font-size:11px;font-weight:800;
-                       text-transform:uppercase;
-                       letter-spacing:1.5px;">
+          <td bgcolor="#15153a"
+              style="background:#15153a;border-radius:18px;
+                     padding:26px 28px 14px;border:1px solid #2a2a5e;">
+            <p style="font-family:'Trebuchet MS',Arial,sans-serif;
+                      margin:0 0 18px 0;color:#e94560;
+                      font-size:12px;font-weight:bold;
+                      text-transform:uppercase;letter-spacing:2.5px;">
+              In this issue
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              {index_html}
+            </table>
+            <p style="font-family:'Trebuchet MS',Arial,sans-serif;
+                      margin:6px 0 12px 0;font-size:11px;
+                      color:#8e96c4;letter-spacing:1px;
+                      text-transform:uppercase;">
               This week's sources
             </p>
-            {pills}
+            <p style="margin:0 0 12px 0;">{pills}</p>
           </td>
         </tr>
 
-        <tr><td style="height:20px;">&nbsp;</td></tr>
+        <tr><td style="height:26px;font-size:1px;">&nbsp;</td></tr>
 
         <!-- ══ INTRO NOTE ══ -->
         <tr>
-          <td style="background:#ffffff;border-radius:14px;
-                     padding:22px 24px;
-                     border-left:5px solid #e94560;">
-            <p style="font-family:Arial,sans-serif;
-                       margin:0 0 10px 0;font-size:15px;
-                       line-height:1.7;color:#222222;
-                       font-weight:700;">
-              Hey there! Welcome to this week's edition of Scope Creep.
+          <td bgcolor="#181840"
+              style="background:#181840;border-radius:18px;
+                     padding:26px 30px;border-left:5px solid #e94560;">
+            <p style="font-family:'Trebuchet MS',Arial,sans-serif;
+                      margin:0 0 10px 0;font-size:17px;
+                      line-height:1.6;color:#ffffff;font-weight:bold;">
+              Hey there! Welcome to this week's edition of {NEWSLETTER_NAME}.
             </p>
-            <p style="font-family:Arial,sans-serif;
-                       margin:0;font-size:14px;
-                       line-height:1.7;color:#444444;">
-              Your weekly dose of the best product management reads,
-              handpicked by AI and curated for PM professionals.
-              Here are your top 5 for this week.
+            <p style="font-family:Georgia,'Times New Roman',serif;
+                      margin:0;font-size:15px;line-height:1.8;
+                      color:#cdd3f0;">
+              Five reads, one agent, zero fluff. Each pick below was
+              pulled from a different corner of the PM internet and
+              summarised so you know in 30 seconds whether it deserves
+              your next coffee break.
             </p>
           </td>
         </tr>
 
-        <tr><td style="height:28px;">&nbsp;</td></tr>
+        <tr><td style="height:32px;font-size:1px;">&nbsp;</td></tr>
 
         <!-- ══ ARTICLE CARDS ══ -->
         <tr>
@@ -612,28 +680,41 @@ def build_newsletter_html(results: list[dict]) -> str:
 
         <!-- ══ FOOTER ══ -->
         <tr>
-          <td style="background:#16213e;border-radius:14px;
-                     padding:28px 24px;text-align:center;
-                     border-top:3px solid #e94560;">
-            <p style="font-family:Arial,sans-serif;
-                       margin:0 0 8px 0;color:#a8b2d8;
-                       font-size:13px;font-weight:600;">
-              You're receiving this because you subscribed to
-              {NEWSLETTER_NAME}.
-            </p>
-            <p style="font-family:Arial,sans-serif;
-                       margin:0;color:#8892b0;font-size:11px;
-                       line-height:1.8;">
-              Pioneered by Koushik &nbsp;&middot;&nbsp;
-              Curated by AI &nbsp;&middot;&nbsp;
-              Powered by Claude Haiku &amp; Buttondown
-              &nbsp;&middot;&nbsp;
-              Built on GitHub Actions
-            </p>
+          <td style="border-radius:18px;overflow:hidden;">
+            {aurora_seam(height=4)}
+            <table width="100%" cellpadding="0" cellspacing="0"
+                   bgcolor="#15153a" style="background:#15153a;">
+              <tr>
+                <td style="padding:30px 28px;text-align:center;">
+                  <p style="font-family:'Trebuchet MS',Arial,sans-serif;
+                            margin:0 0 12px 0;color:#ffffff;
+                            font-size:14px;font-weight:bold;">
+                    Enjoyed this issue? Forward it to a PM friend.
+                  </p>
+                  <p style="font-family:'Trebuchet MS',Arial,sans-serif;
+                            margin:0 0 16px 0;color:#a8d8ea;
+                            font-size:13px;">
+                    Curated by Koushik &mdash;
+                    <a href="{LINKEDIN_URL}" target="_blank"
+                       style="color:#e94560;font-weight:bold;
+                              text-decoration:none;">
+                      say hi on LinkedIn &rarr;</a>
+                  </p>
+                  <p style="font-family:'Trebuchet MS',Arial,sans-serif;
+                            margin:0;color:#8e96c4;font-size:11px;
+                            line-height:1.8;">
+                    You're receiving this because you subscribed to
+                    {NEWSLETTER_NAME}. &nbsp;&middot;&nbsp;
+                    Powered by Claude Haiku &amp; Buttondown
+                    &nbsp;&middot;&nbsp; Built on GitHub Actions
+                  </p>
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>
 
-        <tr><td style="height:24px;">&nbsp;</td></tr>
+        <tr><td style="height:24px;font-size:1px;">&nbsp;</td></tr>
 
       </table>
     </td>
