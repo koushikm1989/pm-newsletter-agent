@@ -4,15 +4,24 @@ import requests
 import os
 import re
 import time
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
 # ── NEWSLETTER CONFIG ─────────────────────────────────────────────────────────
 
 NEWSLETTER_NAME    = "Scope Creep"
-NEWSLETTER_TAGLINE = "Top 5 product management reads, curated by AI — every Monday."
+NEWSLETTER_TAGLINE = "Top 5 product management reads, curated by AI. Fresh every Sunday."
 START_DATE         = datetime(2026, 4, 30)
-LINKEDIN_URL       = "https://www.linkedin.com/in/mukherjee-koushik/"
+
+# Replace after MailerLite setup (Step 2 below tells you where each comes from)
+MAILERLITE_SUBSCRIBE_URL = "https://dashboard.mailerlite.com/forms/190360336721774303/content"
+MAILERLITE_GROUP_ID      = "190360180433618205"
+MAILERLITE_FROM_EMAIL    = "mukherjee.koushik89@gmail.com"
+MAILERLITE_FROM_NAME     = "Koushik Mukherjee"
 
 def get_issue_number() -> int:
     weeks_since_start = ((datetime.now() - START_DATE).days // 7) + 1
@@ -35,6 +44,13 @@ GOOGLE_NEWS_FEEDS = [
     "https://news.google.com/rss/search?q=product+management&hl=en-IN&gl=IN&ceid=IN:en",
     "https://news.google.com/rss/search?q=AI+product+management&hl=en-IN&gl=IN&ceid=IN:en",
     "https://news.google.com/rss/search?q=product+manager+career&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=artificial+intelligence+breakthrough&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=science+discovery&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=technology+innovation&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=education+future+learning&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=sports+inspiring+comeback&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=motivational+success+story&hl=en-IN&gl=IN&ceid=IN:en",
+    "https://news.google.com/rss/search?q=startup+founder+story&hl=en-IN&gl=IN&ceid=IN:en",
 ]
 
 MEDIUM_URLS = [
@@ -71,18 +87,30 @@ YOUTUBE_HANDLES = [
     "@hellopm",
 ]
 
-# ── POOL METADATA ─────────────────────────────────────────────────────────────
-# Brand-accurate accent colors. Each card glows in its source's color.
+# ── POOL METADATA (vibrant palette) ───────────────────────────────────────────
 
 POOL_META = {
-    "Reddit":      {"color": "#ff4500", "emoji": "👾"},
-    "Google News": {"color": "#4285f4", "emoji": "📰"},
-    "Medium":      {"color": "#1a8917", "emoji": "✍️"},
-    "Blog":        {"color": "#d97706", "emoji": "📝"},
-    "LinkedIn":    {"color": "#0a66c2", "emoji": "💼"},
-    "Pinterest":   {"color": "#e60023", "emoji": "📌"},
-    "YouTube":     {"color": "#ff0033", "emoji": "▶️"},
-    "Unknown":     {"color": "#7f8ca3", "emoji": "🔗"},
+    "Reddit":      {"color": "#ff4500", "emoji": "👾", "bg": "#fff3ee", "border": "#ffc4ac"},
+    "Google News": {"color": "#1a73e8", "emoji": "📰", "bg": "#eef4ff", "border": "#a8c4f8"},
+    "Medium":      {"color": "#1a1a1a", "emoji": "✍️", "bg": "#f4f4f4", "border": "#cfcfcf"},
+    "Blog":        {"color": "#0f5bbf", "emoji": "📝", "bg": "#eaf2ff", "border": "#93bbf5"},
+    "LinkedIn":    {"color": "#0077b5", "emoji": "💼", "bg": "#e9f5fb", "border": "#7ec8e3"},
+    "Pinterest":   {"color": "#c8083a", "emoji": "📌", "bg": "#ffeef1", "border": "#f5a0b0"},
+    "YouTube":     {"color": "#cc0000", "emoji": "▶️", "bg": "#fff0f0", "border": "#ffaaaa"},
+    "Unknown":     {"color": "#444444", "emoji": "🔗", "bg": "#f5f5f5", "border": "#cccccc"},
+}
+
+# Brand palette for the vibrant template
+BRAND = {
+    "ink":      "#15103a",   # deep indigo background
+    "panel":    "#1f1850",   # raised panel
+    "card":     "#ffffff",   # card surface
+    "accent1":  "#ff5d73",   # coral/pink
+    "accent2":  "#7c5cff",   # violet
+    "accent3":  "#23d5ab",   # mint
+    "sun":      "#ffc24b",   # amber
+    "text":     "#2a2540",   # body text on white
+    "muted":    "#b9b4e0",   # muted lavender on dark
 }
 
 # ── HELPERS ───────────────────────────────────────────────────────────────────
@@ -95,6 +123,48 @@ HEADERS = {
     )
 }
 FEEDPARSER_AGENT = HEADERS["User-Agent"]
+
+
+def strip_emdashes(text: str) -> str:
+    text = text.replace(" — ", ", ").replace("—", ", ")
+    text = text.replace(" – ", ", ").replace("–", "-")
+    text = re.sub(r"\s{2,}", " ", text)
+    return text.strip()
+
+
+def to_unicode_bold(text: str) -> str:
+    out = []
+    for ch in text:
+        o = ord(ch)
+        if 0x41 <= o <= 0x5A:
+            out.append(chr(o + 0x1D593))
+        elif 0x61 <= o <= 0x7A:
+            out.append(chr(o + 0x1D58D))
+        elif 0x30 <= o <= 0x39:
+            out.append(chr(o + 0x1D7BC))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def to_unicode_italic(text: str) -> str:
+    out = []
+    for ch in text:
+        o = ord(ch)
+        if 0x41 <= o <= 0x5A:
+            out.append(chr(o + 0x1D5C7))
+        elif 0x61 <= o <= 0x7A:
+            out.append(chr(o + 0x1D5C1))
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def apply_linkedin_formatting(text: str) -> str:
+    text = text.replace("-> ", "→ ").replace("->", "→")
+    text = re.sub(r"\*\*(.+?)\*\*", lambda m: to_unicode_bold(m.group(1)), text)
+    text = re.sub(r"\*(.+?)\*", lambda m: to_unicode_italic(m.group(1)), text)
+    return text
 
 
 def extract_image(entry) -> str:
@@ -249,10 +319,23 @@ def fetch_blogs(urls: list[str]) -> list[dict]:
 
 # ── CLAUDE ────────────────────────────────────────────────────────────────────
 
-def pick_and_summarise(
-    client, articles: list[dict],
-    source_label: str, already_picked: list[str],
-) -> dict:
+def call_claude(client, prompt: str, max_tokens: int):
+    for attempt in range(3):
+        try:
+            return client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception as e:
+            if "overloaded" in str(e).lower() and attempt < 2:
+                print(f"  Anthropic overloaded, retrying in 30s... (attempt {attempt+1})")
+                time.sleep(30)
+            else:
+                raise
+
+
+def pick_and_summarise(client, articles, source_label, already_picked) -> dict:
     candidates = [a for a in articles if a["link"] not in already_picked]
     if not candidates:
         return None
@@ -264,20 +347,23 @@ def pick_and_summarise(
         for i, a in enumerate(candidates[:20])
     ])
 
-    prompt = f"""You are the editor of Scope Creep, a Product Management newsletter for PM professionals.
+    prompt = f"""You are the editor of Scope Creep, a Product Management newsletter, written in the voice of Koushik Mukherjee (a Lead Product Owner).
 
 Source pool: {source_label}
 Today: {datetime.now().strftime('%B %d, %Y')}
 
 Pick the SINGLE most valuable article for a PM audience.
-Prioritise: actionable insight, AI in product, career growth.
-Avoid: memes, low-effort posts, generic news.
+Prioritise: actionable insight, AI in product, career growth, or a genuinely witty or motivational angle.
+Avoid: low-effort posts, generic news.
 
 {numbered}
 
-Write a newsletter summary of 4-5 sentences that explains what the article is about,
-highlights 2-3 key takeaways a PM would care about, and ends with why this matters now.
-Do NOT write a LinkedIn post. Write a newsletter summary paragraph only.
+Write a summary of 3 to 4 sentences in Koushik's voice:
+- Human and conversational, first person where it fits, a little opinionated.
+- Explain what the article is about and 2 takeaways a PM would care about.
+- End on why it matters right now.
+- NEVER use em dashes or en dashes. Use commas and full stops. Keep sentences short.
+- No corporate jargon. This is a newsletter summary, not a LinkedIn post.
 
 Respond in EXACTLY this format:
 
@@ -288,24 +374,9 @@ Source: [source]
 Why picked: [one sentence]
 
 SUMMARY:
-[4-5 sentence newsletter summary paragraph]"""
+[3-4 sentence summary in Koushik's voice]"""
 
-    message = None
-    for attempt in range(3):
-        try:
-            message = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=800,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            break
-        except Exception as e:
-            if "overloaded" in str(e).lower() and attempt < 2:
-                print(f"  Anthropic overloaded, retrying in 30s... (attempt {attempt+1})")
-                time.sleep(30)
-            else:
-                raise
-
+    message = call_claude(client, prompt, 600)
     text = message.content[0].text
     picked_index = 0
     match = re.search(r"PICK:\s*\[?(\d+)\]?", text)
@@ -313,23 +384,19 @@ SUMMARY:
         idx = int(match.group(1)) - 1
         if 0 <= idx < len(candidates):
             picked_index = idx
-
     return {"article": candidates[picked_index], "response": text}
 
 
-def curate_five(all_pools: dict) -> list[dict]:
-    client  = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+def curate_five(client, all_pools: dict) -> list[dict]:
     results = []
     picked  = []
-
     pools_in_order = [
         ("REDDIT",                         all_pools["reddit"]),
         ("GOOGLE NEWS",                    all_pools["google"]),
         ("YOUTUBE / LINKEDIN / PINTEREST", all_pools["new"]),
         ("MEDIUM / BLOGS",                 all_pools["other"]),
-        ("ALL SOURCES — wildcard",         all_pools["all"]),
+        ("ALL SOURCES wildcard",           all_pools["all"]),
     ]
-
     for label, pool in pools_in_order:
         if len(results) >= 5:
             break
@@ -338,201 +405,120 @@ def curate_five(all_pools: dict) -> list[dict]:
         if result:
             results.append(result)
             picked.append(result["article"]["link"])
-
     return results
 
 
-# ── HTML NEWSLETTER ───────────────────────────────────────────────────────────
-#
-# Design system — "Aurora Editorial"
-#   Void      #0d0d22  email body background
-#   Panel     #15153a  hero / footer / index surfaces
-#   Card      #181840  article card surface
-#   Coral     #e94560  primary accent
-#   Violet    #533483  secondary accent
-#   Sky       #a8d8ea  tagline / soft text
-#   Slate     #8e96c4  muted text
-#   Per-card accents come from POOL_META (brand colors of each source).
-#
-# Signature element: the "aurora seam" — a segmented coral→violet→navy
-# strip that opens the issue and recurs as a divider. It encodes the idea
-# of many sources blending into one curated stream.
-#
-# Type: Arial Black masthead, Trebuchet MS headings/labels, Georgia body
-# (all email-safe; Georgia gives the summaries an editorial, legible feel).
-
-AURORA = ["#e94560", "#ef4e74", "#a23e88", "#533483", "#2c4a78", "#0f3460"]
-
-SECTION_LABELS = [
-    "Top Pick",
-    "In the News",
-    "Watch &amp; Learn",
-    "Deep Read",
-    "Wildcard",
-]
-SECTION_EMOJI = ["🔥", "📡", "🎬", "📖", "💡"]
+def get_summary(result: dict) -> str:
+    m = re.search(r"SUMMARY:\s*\n([\s\S]+?)(?:\n---|\Z)", result["response"])
+    return strip_emdashes(m.group(1).strip()) if m else ""
 
 
-def aurora_seam(height: int = 5, radius: str = "") -> str:
-    """Segmented gradient strip — the issue's signature element."""
-    cells = "".join(
-        f'<td width="{100 // len(AURORA)}%" bgcolor="{c}" '
-        f'style="background:{c};height:{height}px;font-size:1px;'
-        f'line-height:1px;">&nbsp;</td>'
-        for c in AURORA
-    )
-    return (
-        f'<table width="100%" cellpadding="0" cellspacing="0" '
-        f'style="{radius}"><tr>{cells}</tr></table>'
-    )
-
+# ── VIBRANT HTML NEWSLETTER (MailerLite web + email) ──────────────────────────
 
 def build_newsletter_html(results: list[dict]) -> str:
     date_str = datetime.now().strftime("%B %d, %Y")
     issue    = get_issue_number()
 
-    # ── Hidden preheader (inbox preview text) ────────────────────────────
-    first_title = results[0]["article"]["title"] if results else ""
-    preheader = (
-        f"This week: {first_title} + {max(0, len(results) - 1)} more "
-        f"hand-picked PM reads."
-    )
+    section_labels = [
+        ("🔥", "Top Pick"),
+        ("📡", "In the News"),
+        ("🎬", "Watch & Learn"),
+        ("📖", "Deep Read"),
+        ("💡", "Wildcard"),
+    ]
+    accents = [BRAND["accent1"], BRAND["accent2"], BRAND["accent3"], BRAND["sun"], BRAND["accent1"]]
 
-    # ── "In this issue" index ────────────────────────────────────────────
-    index_rows = []
+    cards = []
     for i, result in enumerate(results):
         article = result["article"]
         pool    = article.get("pool", "Unknown")
         meta    = POOL_META.get(pool, POOL_META["Unknown"])
-        label   = SECTION_LABELS[i] if i < len(SECTION_LABELS) else f"#{i+1}"
-        index_rows.append(f"""
-        <tr>
-          <td width="36" valign="top" style="padding:0 0 14px 0;">
-            <span style="font-family:'Trebuchet MS',Arial,sans-serif;
-                         display:inline-block;width:26px;height:26px;
-                         line-height:26px;text-align:center;
-                         background:{meta['color']};color:#ffffff;
-                         font-size:13px;font-weight:bold;
-                         border-radius:13px;">{i+1}</span>
-          </td>
-          <td valign="top" style="padding:2px 0 14px 0;">
-            <a href="{article['link']}" target="_blank"
-               style="font-family:'Trebuchet MS',Arial,sans-serif;
-                      color:#ffffff;font-size:15px;font-weight:bold;
-                      line-height:1.45;text-decoration:none;">
-              {article['title']}</a>
-            <span style="font-family:'Trebuchet MS',Arial,sans-serif;
-                         color:{meta['color']};font-size:12px;
-                         font-weight:bold;">
-              &nbsp;&middot;&nbsp;{label}</span>
-          </td>
-        </tr>""")
-    index_html = "\n".join(index_rows)
-
-    # ── Article cards ────────────────────────────────────────────────────
-    cards = []
-    for i, result in enumerate(results):
-        article  = result["article"]
-        response = result["response"]
-        pool     = article.get("pool", "Unknown")
-        meta     = POOL_META.get(pool, POOL_META["Unknown"])
-        color    = meta["color"]
-        emoji    = meta["emoji"]
-        label    = SECTION_LABELS[i] if i < len(SECTION_LABELS) else f"#{i+1}"
-        s_emoji  = SECTION_EMOJI[i] if i < len(SECTION_EMOJI) else "•"
-
-        summary_match = re.search(r"SUMMARY:\s*\n([\s\S]+?)(?:\n---|\Z)", response)
-        summary       = summary_match.group(1).strip() if summary_match else ""
-        summary_html  = summary.replace("\n", "<br>")
-
-        # Prettify URL-style sources (e.g. Medium feeds) into clean labels
-        source_label = article["source"]
-        if source_label.startswith("http"):
-            source_label = re.sub(r"^https?://(www\.)?", "", source_label).rstrip("/")
+        emoji_s, label = section_labels[i] if i < len(section_labels) else ("✨", f"Pick {i+1}")
+        accent  = accents[i % len(accents)]
+        summary_html = get_summary(result).replace("\n", "<br>")
 
         img_html = ""
         if article.get("image"):
             img_html = f"""
-        <tr>
-          <td style="line-height:0;font-size:0;">
-            <a href="{article['link']}" target="_blank" style="display:block;">
-              <img src="{article['image']}" width="680"
-                   style="display:block;width:100%;height:300px;
-                          object-fit:cover;border:0;" alt="">
-            </a>
-          </td>
-        </tr>"""
+            <tr><td style="padding:0 0 18px 0;line-height:0;">
+              <img src="{article['image']}" width="100%" alt=""
+                   style="display:block;width:100%;max-height:230px;
+                          object-fit:cover;border-radius:14px;">
+            </td></tr>"""
 
         cards.append(f"""
-<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#181840"
-       style="margin-bottom:32px;border-radius:18px;overflow:hidden;
-              background:#181840;border:1px solid {color};">
-  {img_html}
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="margin:0 0 22px 0;background:{BRAND['card']};
+              border-radius:18px;overflow:hidden;
+              box-shadow:0 10px 30px rgba(20,16,58,0.18);">
   <tr>
-    <td bgcolor="{color}" style="background:{color};padding:14px 28px;">
-      <table width="100%" cellpadding="0" cellspacing="0">
+    <td style="height:6px;background:{accent};font-size:1px;line-height:1px;">&nbsp;</td>
+  </tr>
+  <tr>
+    <td style="padding:22px 24px 24px 24px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:12px;">
         <tr>
-          <td style="font-family:'Trebuchet MS',Arial,sans-serif;
-                     color:#ffffff;font-size:15px;font-weight:bold;
-                     letter-spacing:1px;text-transform:uppercase;">
-            {s_emoji} &nbsp;{i+1} / {len(results)} &mdash; {label}
+          <td>
+            <span style="font-family:'Trebuchet MS',Verdana,sans-serif;
+                         background:{accent};color:#ffffff;font-size:12px;
+                         font-weight:bold;padding:5px 14px;border-radius:30px;
+                         letter-spacing:0.4px;">
+              {emoji_s} {label}
+            </span>
           </td>
           <td align="right">
-            <span style="font-family:'Trebuchet MS',Arial,sans-serif;
-                         background:#0d0d22;color:#ffffff;
-                         font-size:11px;font-weight:bold;
-                         padding:4px 12px;border-radius:20px;">
-              {emoji} {pool}
+            <span style="font-family:'Trebuchet MS',Verdana,sans-serif;
+                         background:{meta['bg']};color:{meta['color']};
+                         border:1px solid {meta['border']};font-size:11px;
+                         font-weight:bold;padding:4px 11px;border-radius:30px;">
+              {meta['emoji']} {pool}
             </span>
           </td>
         </tr>
       </table>
-    </td>
-  </tr>
-  <tr>
-    <td style="padding:30px 30px 32px;">
       <table width="100%" cellpadding="0" cellspacing="0">
+        {img_html}
         <tr>
-          <td style="padding-bottom:12px;">
-            <h2 style="font-family:'Trebuchet MS',Arial,sans-serif;
-                       margin:0;font-size:24px;line-height:1.3;
-                       font-weight:bold;color:#ffffff;">
-              <a href="{article['link']}" target="_blank"
-                 style="color:#ffffff;text-decoration:none;">
-                {article['title']}</a>
-            </h2>
+          <td style="padding-bottom:10px;">
+            <a href="{article['link']}" target="_blank"
+               style="font-family:Georgia,'Times New Roman',serif;
+                      color:{BRAND['text']};text-decoration:none;
+                      font-size:21px;line-height:1.3;font-weight:bold;">
+              {article['title']}
+            </a>
           </td>
         </tr>
         <tr>
-          <td style="padding-bottom:20px;">
-            <span style="font-family:'Trebuchet MS',Arial,sans-serif;
-                         color:{color};font-size:12px;font-weight:bold;
-                         letter-spacing:0.8px;text-transform:uppercase;">
-              {source_label[:55]}
+          <td style="padding-bottom:14px;">
+            <span style="font-family:'Trebuchet MS',Verdana,sans-serif;
+                         font-size:12px;color:#8a85a6;">
+              {article['source'][:60]}
             </span>
           </td>
         </tr>
         <tr>
-          <td style="padding-bottom:26px;border-left:4px solid {color};
-                     padding-left:18px;">
-            <p style="font-family:Georgia,'Times New Roman',serif;
-                      margin:0;font-size:16px;line-height:1.85;
-                      color:#cdd3f0;">
+          <td style="padding:0 0 18px 0;">
+            <p style="font-family:Verdana,Geneva,sans-serif;margin:0;
+                      font-size:15px;line-height:1.75;color:{BRAND['text']};">
               {summary_html}
             </p>
           </td>
         </tr>
         <tr>
-          <td bgcolor="{color}" style="background:{color};
-                     border-radius:10px;text-align:center;">
-            <a href="{article['link']}" target="_blank"
-               style="font-family:'Trebuchet MS',Arial,sans-serif;
-                      display:block;color:#ffffff !important;
-                      font-size:15px;font-weight:bold;
-                      padding:15px 24px;text-decoration:none;
-                      border-radius:10px;mso-padding-alt:0;">
-              {('Watch the video' if pool == 'YouTube' else 'Read the full piece')} &rarr;
-            </a>
+          <td>
+            <table cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="background:{accent};border-radius:10px;">
+                  <a href="{article['link']}" target="_blank"
+                     style="font-family:'Trebuchet MS',Verdana,sans-serif;
+                            display:inline-block;color:#ffffff !important;
+                            font-size:14px;font-weight:bold;padding:12px 26px;
+                            text-decoration:none;border-radius:10px;">
+                    Read the full article →
+                  </a>
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>
       </table>
@@ -543,11 +529,10 @@ def build_newsletter_html(results: list[dict]) -> str:
     cards_html = "\n".join(cards)
 
     pills = "".join([
-        f'<span style="font-family:\'Trebuchet MS\',Arial,sans-serif;'
-        f'display:inline-block;'
-        f'background:{POOL_META.get(r["article"].get("pool","Unknown"),POOL_META["Unknown"])["color"]};'
-        f'color:#ffffff;font-size:12px;font-weight:bold;'
-        f'padding:5px 14px;border-radius:20px;margin:3px 4px;">'
+        f'<span style="font-family:Trebuchet MS,Verdana,sans-serif;'
+        f'display:inline-block;background:{POOL_META.get(r["article"].get("pool","Unknown"),POOL_META["Unknown"])["color"]};'
+        f'color:#ffffff;font-size:12px;font-weight:bold;padding:5px 13px;'
+        f'border-radius:30px;margin:3px 4px;">'
         f'{POOL_META.get(r["article"].get("pool","Unknown"),POOL_META["Unknown"])["emoji"]} '
         f'{r["article"].get("pool","Unknown")}</span>'
         for r in results
@@ -558,214 +543,307 @@ def build_newsletter_html(results: list[dict]) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta name="color-scheme" content="dark">
-<meta name="supported-color-schemes" content="dark">
-<title>{NEWSLETTER_NAME} — Issue #{issue}</title>
+<title>{NEWSLETTER_NAME} Issue #{issue}</title>
 </head>
-<body style="margin:0;padding:0;background:#0d0d22;" bgcolor="#0d0d22">
-
-<!-- Preheader: shows in inbox preview, invisible in the email body -->
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;
-            font-size:1px;line-height:1px;color:#0d0d22;">
-  {preheader}
-</div>
-
-<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#0d0d22"
-       style="background:#0d0d22;">
+<body style="margin:0;padding:0;background:{BRAND['ink']};">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:{BRAND['ink']};">
   <tr>
-    <td align="center" style="padding:28px 12px;">
-      <table width="100%" cellpadding="0" cellspacing="0"
-             style="max-width:680px;">
+    <td align="center" style="padding:30px 14px;">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:620px;">
 
-        <!-- ══ HERO ══ -->
+        <!-- HERO -->
         <tr>
-          <td style="border-radius:22px;overflow:hidden;">
-            {aurora_seam(height=6)}
-            <table width="100%" cellpadding="0" cellspacing="0"
-                   bgcolor="#15153a" style="background:#15153a;">
+          <td style="background:{BRAND['panel']};border-radius:22px;
+                     padding:0;overflow:hidden;">
+            <table width="100%" cellpadding="0" cellspacing="0">
               <tr>
-                <td style="padding:44px 36px 40px;text-align:center;">
-                  <span style="font-family:'Trebuchet MS',Arial,sans-serif;
-                               display:inline-block;
-                               border:1px solid #e94560;color:#e94560;
-                               font-size:12px;font-weight:bold;
-                               letter-spacing:3px;text-transform:uppercase;
-                               padding:6px 18px;border-radius:20px;
-                               margin-bottom:20px;">
-                    Issue #{issue} &nbsp;&middot;&nbsp; {date_str}
-                  </span>
-                  <h1 style="font-family:'Arial Black','Trebuchet MS',Arial,sans-serif;
-                             margin:0 0 14px 0;color:#ffffff;
-                             font-size:52px;font-weight:900;
-                             letter-spacing:-1px;line-height:1.05;">
+                <td width="25%" style="background:{BRAND['accent1']};height:8px;font-size:1px;line-height:1px;">&nbsp;</td>
+                <td width="25%" style="background:{BRAND['accent2']};height:8px;font-size:1px;line-height:1px;">&nbsp;</td>
+                <td width="25%" style="background:{BRAND['accent3']};height:8px;font-size:1px;line-height:1px;">&nbsp;</td>
+                <td width="25%" style="background:{BRAND['sun']};height:8px;font-size:1px;line-height:1px;">&nbsp;</td>
+              </tr>
+            </table>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr>
+                <td style="padding:40px 36px 34px 36px;text-align:center;">
+                  <p style="font-family:'Trebuchet MS',Verdana,sans-serif;
+                            margin:0 0 10px 0;color:{BRAND['sun']};
+                            font-size:12px;font-weight:bold;
+                            text-transform:uppercase;letter-spacing:3px;">
+                    Issue #{issue} &nbsp;•&nbsp; {date_str}
+                  </p>
+                  <h1 style="font-family:Georgia,'Times New Roman',serif;
+                             margin:0 0 12px 0;color:#ffffff;font-size:46px;
+                             font-weight:bold;letter-spacing:-1px;line-height:1;">
                     {NEWSLETTER_NAME}
                   </h1>
-                  <p style="font-family:Georgia,'Times New Roman',serif;
-                            font-style:italic;
-                            margin:0 0 24px 0;color:#a8d8ea;
-                            font-size:16px;line-height:1.6;">
+                  <p style="font-family:Verdana,sans-serif;margin:0;
+                            color:{BRAND['muted']};font-size:15px;line-height:1.6;">
                     {NEWSLETTER_TAGLINE}
                   </p>
-                  <p style="font-family:'Trebuchet MS',Arial,sans-serif;
-                            margin:0;color:#8e96c4;font-size:12px;
-                            letter-spacing:0.5px;">
-                    Reddit &middot; Google News &middot; YouTube &middot;
-                    LinkedIn &middot; Pinterest &middot; Medium &middot;
-                    PM Blogs &mdash; one inbox.
-                  </p>
                 </td>
               </tr>
             </table>
-            {aurora_seam(height=6)}
           </td>
         </tr>
 
-        <tr><td style="height:26px;font-size:1px;">&nbsp;</td></tr>
+        <tr><td style="height:18px;">&nbsp;</td></tr>
 
-        <!-- ══ IN THIS ISSUE ══ -->
+        <!-- SOURCES STRIP -->
         <tr>
-          <td bgcolor="#15153a"
-              style="background:#15153a;border-radius:18px;
-                     padding:26px 28px 14px;border:1px solid #2a2a5e;">
-            <p style="font-family:'Trebuchet MS',Arial,sans-serif;
-                      margin:0 0 18px 0;color:#e94560;
-                      font-size:12px;font-weight:bold;
-                      text-transform:uppercase;letter-spacing:2.5px;">
-              In this issue
-            </p>
-            <table width="100%" cellpadding="0" cellspacing="0">
-              {index_html}
-            </table>
-            <p style="font-family:'Trebuchet MS',Arial,sans-serif;
-                      margin:6px 0 12px 0;font-size:11px;
-                      color:#8e96c4;letter-spacing:1px;
-                      text-transform:uppercase;">
+          <td style="background:{BRAND['panel']};border-radius:16px;padding:16px 22px;text-align:center;">
+            <p style="font-family:'Trebuchet MS',Verdana,sans-serif;margin:0 0 9px 0;
+                      color:{BRAND['muted']};font-size:11px;font-weight:bold;
+                      text-transform:uppercase;letter-spacing:1.5px;">
               This week's sources
             </p>
-            <p style="margin:0 0 12px 0;">{pills}</p>
+            <div>{pills}</div>
           </td>
         </tr>
 
-        <tr><td style="height:26px;font-size:1px;">&nbsp;</td></tr>
+        <tr><td style="height:18px;">&nbsp;</td></tr>
 
-        <!-- ══ INTRO NOTE ══ -->
+        <!-- INTRO -->
         <tr>
-          <td bgcolor="#181840"
-              style="background:#181840;border-radius:18px;
-                     padding:26px 30px;border-left:5px solid #e94560;">
-            <p style="font-family:'Trebuchet MS',Arial,sans-serif;
-                      margin:0 0 10px 0;font-size:17px;
-                      line-height:1.6;color:#ffffff;font-weight:bold;">
-              Hey there! Welcome to this week's edition of {NEWSLETTER_NAME}.
+          <td style="background:{BRAND['card']};border-radius:16px;
+                     padding:24px 26px;border-left:6px solid {BRAND['accent1']};">
+            <p style="font-family:Georgia,serif;margin:0 0 10px 0;font-size:17px;
+                      line-height:1.6;color:{BRAND['text']};font-weight:bold;">
+              Hey there! Welcome to this week's Scope Creep.
             </p>
-            <p style="font-family:Georgia,'Times New Roman',serif;
-                      margin:0;font-size:15px;line-height:1.8;
-                      color:#cdd3f0;">
-              Five reads, one agent, zero fluff. Each pick below was
-              pulled from a different corner of the PM internet and
-              summarised so you know in 30 seconds whether it deserves
-              your next coffee break.
+            <p style="font-family:Verdana,sans-serif;margin:0;font-size:14px;
+                      line-height:1.7;color:{BRAND['text']};">
+              Your weekly dose of the best product management reads, handpicked by AI
+              and curated for PM professionals. Here are your top 5 for this week.
             </p>
           </td>
         </tr>
 
-        <tr><td style="height:32px;font-size:1px;">&nbsp;</td></tr>
+        <tr><td style="height:26px;">&nbsp;</td></tr>
 
-        <!-- ══ ARTICLE CARDS ══ -->
+        <!-- CARDS -->
+        <tr><td>{cards_html}</td></tr>
+
+        <!-- FOOTER -->
         <tr>
-          <td>
-            {cards_html}
+          <td style="background:{BRAND['panel']};border-radius:16px;
+                     padding:28px 24px;text-align:center;">
+            <p style="font-family:'Trebuchet MS',Verdana,sans-serif;margin:0 0 8px 0;
+                      color:#ffffff;font-size:14px;font-weight:bold;">
+              Enjoyed this? Forward it to a fellow PM.
+            </p>
+            <p style="font-family:Verdana,sans-serif;margin:0 0 14px 0;
+                      color:{BRAND['muted']};font-size:12px;line-height:1.7;">
+              Pioneered by Koushik • Curated by AI • Powered by Claude Haiku & MailerLite
+            </p>
+            <p style="font-family:Verdana,sans-serif;margin:0;color:#6f6a90;font-size:11px;">
+              You're receiving this because you subscribed to {NEWSLETTER_NAME}.<br>
+              {{$unsubscribe}}
+            </p>
           </td>
         </tr>
 
-        <!-- ══ FOOTER ══ -->
-        <tr>
-          <td style="border-radius:18px;overflow:hidden;">
-            {aurora_seam(height=4)}
-            <table width="100%" cellpadding="0" cellspacing="0"
-                   bgcolor="#15153a" style="background:#15153a;">
-              <tr>
-                <td style="padding:30px 28px;text-align:center;">
-                  <p style="font-family:'Trebuchet MS',Arial,sans-serif;
-                            margin:0 0 12px 0;color:#ffffff;
-                            font-size:14px;font-weight:bold;">
-                    Enjoyed this issue? Forward it to a PM friend.
-                  </p>
-                  <p style="font-family:'Trebuchet MS',Arial,sans-serif;
-                            margin:0 0 16px 0;color:#a8d8ea;
-                            font-size:13px;">
-                    Curated by Koushik &mdash;
-                    <a href="{LINKEDIN_URL}" target="_blank"
-                       style="color:#e94560;font-weight:bold;
-                              text-decoration:none;">
-                      say hi on LinkedIn &rarr;</a>
-                  </p>
-                  <p style="font-family:'Trebuchet MS',Arial,sans-serif;
-                            margin:0;color:#8e96c4;font-size:11px;
-                            line-height:1.8;">
-                    You're receiving this because you subscribed to
-                    {NEWSLETTER_NAME}. &nbsp;&middot;&nbsp;
-                    Powered by Claude Haiku &amp; Buttondown
-                    &nbsp;&middot;&nbsp; Built on GitHub Actions
-                  </p>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-
-        <tr><td style="height:24px;font-size:1px;">&nbsp;</td></tr>
-
+        <tr><td style="height:20px;">&nbsp;</td></tr>
       </table>
     </td>
   </tr>
 </table>
-
 </body>
 </html>"""
 
 
-# ── BUTTONDOWN ────────────────────────────────────────────────────────────────
+# ── MAILERLITE API ────────────────────────────────────────────────────────────
 
-def send_to_buttondown(html: str, results: list[dict]):
-    api_key  = os.environ["BUTTONDOWN_API_KEY"]
+def send_to_mailerlite(html: str, results: list[dict]) -> bool:
+    """Create a draft campaign in MailerLite via API."""
+    api_key  = os.environ["MAILERLITE_API_KEY"]
     issue    = get_issue_number()
     date_str = datetime.now().strftime("%B %d, %Y")
+    subject  = f"{NEWSLETTER_NAME} #{issue} | Top {len(results)} PM Reads | {date_str}"
 
-    subject = (
-        f"{NEWSLETTER_NAME} #{issue} — "
-        f"Top {len(results)} PM Reads | {date_str}"
-    )
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type":  "application/json",
+        "Accept":        "application/json",
+    }
+
+    payload = {
+        "name":    subject,
+        "type":    "regular",
+        "emails": [{
+            "subject":   subject,
+            "from_name": MAILERLITE_FROM_NAME,
+            "from":      MAILERLITE_FROM_EMAIL,
+            "content":   html,
+        }],
+        "groups": [MAILERLITE_GROUP_ID],
+    }
 
     resp = requests.post(
-        "https://api.buttondown.email/v1/emails",
-        headers={
-            "Authorization": f"Token {api_key}",
-            "Content-Type":  "application/json",
-        },
-        json={
-            "subject": subject,
-            "body":    html,
-            "status":  "draft",
-        },
-        timeout=30,
+        "https://connect.mailerlite.com/api/campaigns",
+        headers=headers, json=payload, timeout=30,
     )
 
     if resp.status_code in (200, 201):
-        data = resp.json()
-        print(f"  Draft created in Buttondown!")
-        print(f"  Email ID : {data.get('id')}")
-        print(f"  Subject  : {subject}")
-        print(f"  Go to buttondown.com/emails to review and send.")
-    else:
-        print(f"  Buttondown API error {resp.status_code}: {resp.text}")
-        raise SystemExit(1)
+        data = resp.json().get("data", {})
+        print(f"  MailerLite draft campaign created. ID: {data.get('id')}")
+        print(f"  Subject: {subject}")
+        print(f"  Review and send from your MailerLite dashboard (Campaigns).")
+        return True
+    print(f"  MailerLite API error {resp.status_code}: {resp.text}")
+    return False
+
+
+# ── LINKEDIN TRAILER (.txt, paste-ready) ──────────────────────────────────────
+
+def build_linkedin_txt(client, results: list[dict]) -> str:
+    issue    = get_issue_number()
+    date_str = datetime.now().strftime("%B %d, %Y")
+
+    listing = "\n\n".join([
+        f"[{i+1}] Title: {r['article']['title']}\n"
+        f"Source: {r['article']['source']}\n"
+        f"URL: {r['article']['link']}\n"
+        f"Summary: {r['article'].get('summary', '') or 'n/a'}"
+        for i, r in enumerate(results)
+    ])
+
+    prompt = f"""You are writing a LinkedIn newsletter "trailer" in the voice of Koushik Mukherjee, a Lead Product Owner (B2B SaaS).
+
+Today: {date_str}. This is the LinkedIn companion to the full Scope Creep email newsletter.
+Its job: hook PM readers with ONE article unpacked in full, tease the rest, and drive them to subscribe to the full edition.
+
+This week's 5 curated articles:
+
+{listing}
+
+TASKS:
+1. Choose the SINGLE most compelling article to expand.
+2. Write a punchy HEADLINE for it.
+3. Write a DEEPDIVE of 150 to 220 words in Koushik's voice:
+   - Bold one-line thesis to open, often a contrast.
+   - Decode the insight, name the tension, cite numbers only if they appear in the summary.
+   - Use -> arrow bullets for any 2 to 4 point list.
+   - Mark 1 to 2 key phrases for bold with **double asterisks**, at most one phrase italic with *single asterisks*.
+   - End with a genuine open question.
+4. Write a one-line teaser for EACH of the OTHER four articles (not the expanded one).
+
+VOICE RULES:
+- First person, personal, optimistic, principled.
+- NEVER use em dashes or en dashes. Use commas and full stops. Short sentences.
+- No corporate jargon.
+
+Respond in EXACTLY this format and nothing else:
+
+EXPAND: [article number 1-5]
+HEADLINE: [headline text, no asterisks]
+DEEPDIVE:
+[the 150-220 word deep dive]
+TEASERS:
+[n] one-line teaser for article n
+[n] one-line teaser for article n
+[n] one-line teaser for article n
+[n] one-line teaser for article n"""
+
+    raw = call_claude(client, prompt, 1200).content[0].text
+
+    expand_m   = re.search(r"EXPAND:\s*\[?(\d+)\]?", raw)
+    expand_idx = int(expand_m.group(1)) if expand_m else 1
+    if not (1 <= expand_idx <= len(results)):
+        expand_idx = 1
+
+    headline_m = re.search(r"HEADLINE:\s*(.+)", raw)
+    headline   = headline_m.group(1).strip().replace("*", "") if headline_m else results[expand_idx-1]["article"]["title"]
+
+    deepdive_m = re.search(r"DEEPDIVE:\s*\n([\s\S]+?)\nTEASERS:", raw)
+    deepdive   = deepdive_m.group(1).strip() if deepdive_m else ""
+
+    teasers_block = raw.split("TEASERS:")[-1] if "TEASERS:" in raw else ""
+    teasers       = re.findall(r"\[(\d+)\]\s*(.+)", teasers_block)
+
+    expanded = results[expand_idx-1]["article"]
+    hr = "━" * 24
+
+    lines = []
+    lines.append(f"{to_unicode_bold(NEWSLETTER_NAME)}   •   Issue #{issue}   •   {date_str}")
+    lines.append("")
+    lines.append("Your weekly trailer. The 5 best product reads of the week, with one unpacked in full below.")
+    lines.append("")
+    lines.append(hr)
+    lines.append("")
+    lines.append("🔍 " + to_unicode_bold("THIS WEEK'S DEEP DIVE"))
+    lines.append("")
+    lines.append(to_unicode_bold(strip_emdashes(headline)))
+    lines.append("")
+    lines.append(strip_emdashes(apply_linkedin_formatting(deepdive)))
+    lines.append("")
+    lines.append("Read it in full: " + expanded["link"])
+    lines.append("")
+    lines.append(hr)
+    lines.append("")
+    lines.append("📬 " + to_unicode_bold("ALSO IN THIS WEEK'S FULL EDITION"))
+    lines.append("")
+    for num, teaser in teasers:
+        try:
+            idx = int(num)
+            if idx == expand_idx or not (1 <= idx <= len(results)):
+                continue
+            link = results[idx-1]["article"]["link"]
+        except Exception:
+            continue
+        lines.append("→ " + strip_emdashes(teaser.strip().replace("*", "")))
+        lines.append("   " + link)
+        lines.append("")
+    lines.append(hr)
+    lines.append("")
+    lines.append(to_unicode_bold("Get all 5, every Sunday."))
+    lines.append("The full edition lands in your inbox each week. Subscribe to Scope Creep, free:")
+    lines.append(MAILERLITE_SUBSCRIBE_URL)
+    lines.append("")
+    lines.append("#ProductManagement #AI #Newsletter #ScopeCreep #BuildInPublic")
+
+    return "\n".join(lines)
+
+
+def email_linkedin_txt(txt_content: str):
+    sender    = os.environ["GMAIL_ADDRESS"]
+    password  = os.environ["GMAIL_APP_PASSWORD"]
+    recipient = os.environ["RECIPIENT_EMAIL"]
+    issue     = get_issue_number()
+    date_str  = datetime.now().strftime("%b %d, %Y")
+    filename  = f"scope_creep_linkedin_issue_{issue}.txt"
+
+    msg = MIMEMultipart()
+    msg["Subject"] = f"\u270D\uFE0F Scope Creep #{issue} | LinkedIn newsletter draft | {date_str}"
+    msg["From"] = sender
+    msg["To"]   = recipient
+
+    body = (
+        "Hi Koushik,\n\n"
+        f"Attached is your LinkedIn newsletter draft for Scope Creep #{issue}.\n\n"
+        "It is paste ready. Open the .txt, copy everything, and paste it straight into the "
+        "LinkedIn newsletter editor. Bold text and bullets are built with unicode so they "
+        "survive the paste.\n\n"
+        "This is the trailer. One article is unpacked in full, the other four are teasers that "
+        "point readers to the full MailerLite edition so they subscribe.\n\n"
+        "Have a good Sunday.\n"
+    )
+    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    part = MIMEApplication(txt_content.encode("utf-8-sig"), _subtype="plain")
+    part.add_header("Content-Disposition", "attachment", filename=filename)
+    msg.attach(part)
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(sender, password)
+        server.sendmail(sender, recipient, msg.as_string())
+    print(f"  LinkedIn draft emailed as {filename}")
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print("Step 1/3 — Fetching all sources...")
+    print("Step 1/4 — Fetching all sources...")
 
     reddit = fetch_rss(REDDIT_FEEDS)
     for a in reddit:
@@ -796,13 +874,13 @@ def main():
     blogs = fetch_blogs(BLOG_URLS)
     print(f"  Blogs: {len(blogs)}")
 
-    all_articles = (
-        reddit + google + linkedin + pinterest + youtube + medium + blogs
-    )
+    all_articles = reddit + google + linkedin + pinterest + youtube + medium + blogs
     print(f"  Total: {len(all_articles)} articles collected")
 
-    print("\nStep 2/3 — Claude Haiku: curating top 5...")
-    results = curate_five({
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    print("\nStep 2/4 — Claude Haiku: curating the SAME top 5 for both outputs...")
+    results = curate_five(client, {
         "reddit": reddit,
         "google": google,
         "new":    linkedin + pinterest + youtube,
@@ -811,9 +889,24 @@ def main():
     })
     print(f"  {len(results)} articles selected")
 
-    print("\nStep 3/3 — Building newsletter and sending to Buttondown...")
-    html = build_newsletter_html(results)
-    send_to_buttondown(html, results)
+    if not results:
+        print("No articles available. Exiting.")
+        return
+
+    print("\nStep 3/4 — MailerLite full edition (vibrant)...")
+    try:
+        html = build_newsletter_html(results)
+        send_to_mailerlite(html, results)
+    except Exception as e:
+        print(f"  MailerLite step failed: {e}")
+
+    print("\nStep 4/4 — LinkedIn trailer draft to Gmail...")
+    try:
+        txt = build_linkedin_txt(client, results)
+        email_linkedin_txt(txt)
+    except Exception as e:
+        print(f"  LinkedIn step failed: {e}")
+
     print("\nDone!")
 
 
