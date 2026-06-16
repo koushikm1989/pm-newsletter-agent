@@ -374,7 +374,7 @@ Why picked: [one sentence]
 SUMMARY:
 [3-4 sentence summary in Koushik's voice]"""
 
-message = call_claude(client, prompt, 700)
+    message = call_claude(client, prompt, 700)
     text = message.content[0].text
 
     # Extract and validate the summary before accepting the pick
