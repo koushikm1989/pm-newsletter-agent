@@ -26,7 +26,7 @@ MAILERLITE_FROM_EMAIL = "mukherjee.koushik89@gmail.com"
 MAILERLITE_FROM_NAME  = "Koushik Mukherjee"
 
 # IMPORTANT: replace with your published MailerLite landing-page URL once created
-MAILERLITE_SUBSCRIBE_URL = "https://dashboard.mailerlite.com/forms/190360336721774303/content"
+MAILERLITE_SUBSCRIBE_URL = "https://preview.mailerlite.io/forms/2446886/190360336721774303/share"
 
 def get_issue_number() -> int:
     weeks_since_start = ((datetime.now() - START_DATE).days // 7) + 1
