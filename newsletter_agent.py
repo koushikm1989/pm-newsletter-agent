@@ -374,8 +374,20 @@ Why picked: [one sentence]
 SUMMARY:
 [3-4 sentence summary in Koushik's voice]"""
 
-    message = call_claude(client, prompt, 600)
+message = call_claude(client, prompt, 700)
     text = message.content[0].text
+
+    # Extract and validate the summary before accepting the pick
+    summary_match = re.search(r"SUMMARY:\s*\n([\s\S]+?)(?:\n---|\Z)", text)
+    summary = summary_match.group(1).strip() if summary_match else ""
+
+    # Reject incomplete summaries: must be long enough and end on a real sentence
+    words = summary.split()
+    ends_clean = summary.rstrip().endswith((".", "!", "?"))
+    if len(words) < 25 or not ends_clean:
+        print(f"  Rejected pick (incomplete summary, {len(words)} words). Skipping.")
+        return None
+
     picked_index = 0
     match = re.search(r"PICK:\s*\[?(\d+)\]?", text)
     if match:
@@ -410,13 +422,18 @@ def curate_five(client, all_pools: dict) -> list[dict]:
         if len(results) >= 5:
             break
         cands = candidates_from(pool)
-        if not cands:
-            continue
-        result = pick_and_summarise(client, cands, label)
-        if result:
-            results.append(result)
-            picked_links.add(result["article"]["link"])
-            used_pools.add(result["article"].get("pool"))
+        # Try up to 3 times within this pool if summaries come back incomplete
+        for _ in range(3):
+            if not cands:
+                break
+            result = pick_and_summarise(client, cands, label)
+            if result:
+                results.append(result)
+                picked_links.add(result["article"]["link"])
+                used_pools.add(result["article"].get("pool"))
+                break
+            # Rejected: drop the first candidate and retry with the rest
+            cands = cands[1:]
 
     if len(results) < 5:
         cands = candidates_from(all_pools["all"])
@@ -465,6 +482,7 @@ def build_newsletter_html(results: list[dict]) -> str:
         summary       = strip_emdashes(summary)
         summary_html  = summary.replace("\n", "<br>")
 
+        media_html = ""
         if article.get("image"):
             media_html = f"""
             <tr>
@@ -472,27 +490,6 @@ def build_newsletter_html(results: list[dict]) -> str:
                 <img src="{article['image']}" width="100%"
                      style="display:block;width:100%;height:240px;
                             object-fit:cover;" alt="">
-              </td>
-            </tr>"""
-        else:
-            media_html = f"""
-            <tr>
-              <td style="padding:0;line-height:0;
-                         background:linear-gradient(135deg,{color} 0%,{grad} 100%);
-                         height:160px;text-align:center;vertical-align:middle;">
-                <table width="100%" height="160" cellpadding="0" cellspacing="0">
-                  <tr>
-                    <td align="center" valign="middle">
-                      <div style="font-size:54px;line-height:1;">{meta['emoji']}</div>
-                      <div style="font-family:'Trebuchet MS',Arial,sans-serif;
-                                  color:rgba(255,255,255,0.92);font-size:13px;
-                                  font-weight:800;letter-spacing:3px;
-                                  text-transform:uppercase;margin-top:10px;">
-                        {pool}
-                      </div>
-                    </td>
-                  </tr>
-                </table>
               </td>
             </tr>"""
 
