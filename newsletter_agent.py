@@ -824,17 +824,15 @@ def send_to_mailerlite(html: str, results: list[dict]) -> str:
         "type":        "regular",
         "name":        f"Scope Creep #{issue} - {date_str}",
         "language_id": 4,
-        "groups":      [str(MAILERLITE_GROUP_ID)],
         "emails": [
             {
-                "subject":      subject,
-                "from_name":    MAILERLITE_FROM_NAME,
-                "from":         from_email,
-                "reply_to":     from_email,
-                "content":      html,
-                "preview_text": preview,
+                "subject":   subject,
+                "from_name": MAILERLITE_FROM_NAME,
+                "from":      from_email,
+                "content":   html,
             }
         ],
+        "groups": [str(MAILERLITE_GROUP_ID)],
     }
 
     create_resp = requests.post(
