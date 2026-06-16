@@ -17,8 +17,16 @@ NEWSLETTER_NAME    = "Scope Creep"
 NEWSLETTER_TAGLINE = "Top 5 product management reads, curated by AI. Fresh every Sunday."
 START_DATE         = datetime(2026, 4, 30)
 
+# Your MailerLite group ID (confirmed from your account)
+MAILERLITE_GROUP_ID = "190360180433618205"
+
+# IMPORTANT: must be the sender email you VERIFIED in MailerLite
+# (MailerLite dashboard, Settings, Sender identities / Domains)
+MAILERLITE_FROM_EMAIL = "mukherjee.koushik89@gmail.com"
+MAILERLITE_FROM_NAME  = "Koushik Mukherjee"
+
+# IMPORTANT: replace with your published MailerLite landing-page URL once created
 MAILERLITE_SUBSCRIBE_URL = "https://dashboard.mailerlite.com/forms/190360336721774303/content"
-MAILERLITE_GROUP_ID      = "190360180433618205"
 
 def get_issue_number() -> int:
     weeks_since_start = ((datetime.now() - START_DATE).days // 7) + 1
@@ -398,7 +406,6 @@ def curate_five(client, all_pools: dict) -> list[dict]:
             and a.get("pool") not in used_pools
         ]
 
-    # Pass 1 — one pick per ordered bucket, distinct pools only
     for label, pool in pools_in_order:
         if len(results) >= 5:
             break
@@ -411,10 +418,8 @@ def curate_five(client, all_pools: dict) -> list[dict]:
             picked_links.add(result["article"]["link"])
             used_pools.add(result["article"].get("pool"))
 
-    # Pass 2 — if still under 5, fill from any unused pool across everything
     if len(results) < 5:
         cands = candidates_from(all_pools["all"])
-        # group by pool so each fill pick is a new distinct source type
         seen = set()
         unique_pool_cands = []
         for a in cands:
@@ -430,7 +435,7 @@ def curate_five(client, all_pools: dict) -> list[dict]:
                 picked_links.add(result["article"]["link"])
                 used_pools.add(result["article"].get("pool"))
 
-    print(f"  Distinct sources used: {', '.join(sorted(used_pools))}")
+    print(f"  Distinct sources used: {', '.join(sorted(p for p in used_pools if p))}")
     return results
 
 
@@ -449,7 +454,7 @@ def build_newsletter_html(results: list[dict]) -> str:
         meta     = POOL_META.get(pool, POOL_META["Unknown"])
         color    = meta["color"]
         grad     = meta["grad"]
-        bg        = meta["bg"]
+        bg       = meta["bg"]
         light    = meta["light"]
 
         sec_emoji, sec_label, sec_sub = SECTION_LABELS[i] \
@@ -460,7 +465,6 @@ def build_newsletter_html(results: list[dict]) -> str:
         summary       = strip_emdashes(summary)
         summary_html  = summary.replace("\n", "<br>")
 
-        # Image, or vibrant gradient banner fallback
         if article.get("image"):
             media_html = f"""
             <tr>
@@ -495,13 +499,10 @@ def build_newsletter_html(results: list[dict]) -> str:
         source_label = article["source"][:50] if article.get("source") else pool
 
         cards.append(f"""
-<!-- Card {i+1} -->
 <table width="100%" cellpadding="0" cellspacing="0"
        style="margin-bottom:36px;border-radius:22px;overflow:hidden;
               background:#ffffff;
               box-shadow:0 12px 40px rgba(15,23,42,0.18);">
-
-  <!-- Section strip -->
   <tr>
     <td style="background:linear-gradient(100deg,{color} 0%,{grad} 100%);
                padding:16px 30px;">
@@ -530,10 +531,7 @@ def build_newsletter_html(results: list[dict]) -> str:
       </table>
     </td>
   </tr>
-
   {media_html}
-
-  <!-- Body -->
   <tr>
     <td style="padding:30px 30px 26px;">
       <table width="100%" cellpadding="0" cellspacing="0">
@@ -614,14 +612,12 @@ def build_newsletter_html(results: list[dict]) -> str:
 <body style="margin:0;padding:0;
              background:#0B1020;
              background:linear-gradient(160deg,#0B1020 0%,#1A1442 40%,#2D1B5E 70%,#0B1020 100%);">
-
 <table width="100%" cellpadding="0" cellspacing="0"
        style="background:linear-gradient(160deg,#0B1020 0%,#1A1442 40%,#2D1B5E 70%,#0B1020 100%);">
   <tr>
     <td align="center" style="padding:36px 14px 56px;">
       <table width="100%" cellpadding="0" cellspacing="0" style="max-width:680px;">
 
-        <!-- ══ HERO ══ -->
         <tr>
           <td style="border-radius:26px;overflow:hidden;
                      background:linear-gradient(135deg,
@@ -670,7 +666,6 @@ def build_newsletter_html(results: list[dict]) -> str:
 
         <tr><td style="height:26px;">&nbsp;</td></tr>
 
-        <!-- ══ SOURCES ══ -->
         <tr>
           <td style="background:rgba(255,255,255,0.06);
                      border:1px solid rgba(255,255,255,0.10);
@@ -687,7 +682,6 @@ def build_newsletter_html(results: list[dict]) -> str:
 
         <tr><td style="height:22px;">&nbsp;</td></tr>
 
-        <!-- ══ INTRO ══ -->
         <tr>
           <td style="background:linear-gradient(135deg,#FEF3C7,#FFE4E6);
                      border-radius:18px;padding:26px 30px;
@@ -708,10 +702,8 @@ def build_newsletter_html(results: list[dict]) -> str:
 
         <tr><td style="height:36px;">&nbsp;</td></tr>
 
-        <!-- ══ CARDS ══ -->
         <tr><td>{cards_html}</td></tr>
 
-        <!-- ══ SUBSCRIBE CTA ══ -->
         <tr>
           <td style="border-radius:22px;overflow:hidden;
                      background:linear-gradient(135deg,
@@ -761,7 +753,6 @@ def build_newsletter_html(results: list[dict]) -> str:
 
         <tr><td style="height:30px;">&nbsp;</td></tr>
 
-        <!-- ══ FOOTER ══ -->
         <tr>
           <td style="text-align:center;padding:20px 0;">
             <p style="font-family:Arial,sans-serif;color:#94A3B8;
@@ -782,7 +773,6 @@ def build_newsletter_html(results: list[dict]) -> str:
     </td>
   </tr>
 </table>
-
 </body>
 </html>"""
 
@@ -798,7 +788,6 @@ def _ml_headers():
 
 
 def get_campaign_webview(campaign_id: str) -> str:
-    """Try to fetch the public web-view URL of a campaign. Field names vary, so we probe several."""
     try:
         resp = requests.get(
             f"https://connect.mailerlite.com/api/campaigns/{campaign_id}",
@@ -807,11 +796,9 @@ def get_campaign_webview(campaign_id: str) -> str:
         if resp.status_code != 200:
             return None
         data = resp.json().get("data", {})
-        # Probe common top-level keys
         for key in ("webview_url", "webview_link", "preview_url", "url"):
             if data.get(key):
                 return data[key]
-        # Probe the nested email object
         emails = data.get("emails") or []
         if emails and isinstance(emails, list):
             for key in ("webview_url", "webview_link", "preview_url", "url"):
@@ -823,25 +810,31 @@ def get_campaign_webview(campaign_id: str) -> str:
 
 
 def send_to_mailerlite(html: str, results: list[dict]) -> str:
-    """Create + schedule a MailerLite campaign. Returns the web-view URL if available."""
     issue    = get_issue_number()
     date_str = datetime.now().strftime("%B %d, %Y")
     subject  = f"{NEWSLETTER_NAME} #{issue} | Top {len(results)} PM Reads | {date_str}"
-    preview  = " · ".join([r["article"]["title"][:40] for r in results[:3]])
+    preview  = ", ".join([r["article"]["title"][:40] for r in results[:3]])
+
+    from_email = MAILERLITE_FROM_EMAIL.strip()
+    if not from_email or "@" not in from_email:
+        print("  ERROR: MAILERLITE_FROM_EMAIL is not a valid email.")
+        return None
 
     campaign_payload = {
-        "type": "regular",
-        "name": f"Scope Creep #{issue} — {date_str}",
+        "type":        "regular",
+        "name":        f"Scope Creep #{issue} - {date_str}",
         "language_id": 4,
-        "emails": [{
-            "subject":      subject,
-            "from_name":    "Koushik Mukherjee",
-            "from":         os.environ.get("MAILERLITE_FROM_EMAIL", ""),
-            "reply_to":     os.environ.get("MAILERLITE_FROM_EMAIL", ""),
-            "content":      html,
-            "preview_text": preview,
-        }],
-        "groups": [MAILERLITE_GROUP_ID],
+        "groups":      [str(MAILERLITE_GROUP_ID)],
+        "emails": [
+            {
+                "subject":      subject,
+                "from_name":    MAILERLITE_FROM_NAME,
+                "from":         from_email,
+                "reply_to":     from_email,
+                "content":      html,
+                "preview_text": preview,
+            }
+        ],
     }
 
     create_resp = requests.post(
@@ -864,14 +857,15 @@ def send_to_mailerlite(html: str, results: list[dict]) -> str:
         print(f"  Subject: {subject}")
     else:
         print(f"  MailerLite schedule error {schedule_resp.status_code}: {schedule_resp.text}")
+        print("  (Campaign exists as a draft. If your account isn't approved for")
+        print("   sending yet, open it in MailerLite and send manually.)")
 
-    # Give MailerLite a moment, then try to grab the web link
     time.sleep(5)
     web_url = get_campaign_webview(campaign_id)
     if web_url:
         print(f"  Web version: {web_url}")
     else:
-        print("  Web version URL not available yet (it appears once the send completes).")
+        print("  Web version URL not available yet (appears once the send completes).")
     return web_url
 
 
