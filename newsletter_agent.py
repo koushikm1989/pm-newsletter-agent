@@ -838,7 +838,7 @@ def send_to_mailerlite(html: str, results: list[dict]) -> str:
             "from_name":    "Koushik Mukherjee",
             "from":         os.environ.get("MAILERLITE_FROM_EMAIL", ""),
             "reply_to":     os.environ.get("MAILERLITE_FROM_EMAIL", ""),
-            "content":      "<html><body><h1>Scope Creep test</h1><p>Minimal payload test.</p></body></html>",
+            "content":      html,
             "preview_text": preview,
         }],
         "groups": [MAILERLITE_GROUP_ID],
