@@ -1049,75 +1049,24 @@ def email_linkedin_txt(txt_content: str, web_url: str = None):
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print("Step 1/4 — Fetching all sources...")
+    import json
+    headers = {
+        "Authorization": f"Bearer {os.environ['MAILERLITE_API_KEY']}",
+        "Accept": "application/json",
+    }
 
-    reddit = fetch_rss(REDDIT_FEEDS)
-    for a in reddit:
-        a["pool"] = "Reddit"
-    print(f"  Reddit: {len(reddit)}")
+    print("=== YOUR GROUPS ===")
+    g = requests.get("https://connect.mailerlite.com/api/groups", headers=headers, timeout=30)
+    print(g.status_code)
+    for grp in g.json().get("data", []):
+        print(f"  id={grp.get('id')}  name={grp.get('name')}")
 
-    google = fetch_rss(GOOGLE_NEWS_FEEDS, max_age_hours=168)
-    for a in google:
-        a["pool"] = "Google News"
-    print(f"  Google News: {len(google)}")
-
-    linkedin_rss = fetch_rss(LINKEDIN_RSS_FEEDS)
-    for a in linkedin_rss:
-        a["pool"] = "LinkedIn"
-    print(f"  LinkedIn RSS: {len(linkedin_rss)}")
-
-    pinterest = fetch_rss(PINTEREST_RSS_FEEDS)
-    for a in pinterest:
-        a["pool"] = "Pinterest"
-    print(f"  Pinterest RSS: {len(pinterest)}")
-
-    youtube = fetch_youtube(YOUTUBE_HANDLES)
-    print(f"  YouTube: {len(youtube)}")
-
-    medium = fetch_medium(MEDIUM_URLS)
-    print(f"  Medium: {len(medium)}")
-
-    blogs = fetch_blogs(BLOG_URLS)
-    print(f"  Blogs: {len(blogs)}")
-
-    all_articles = (
-        reddit + google + linkedin_rss + pinterest + youtube + medium + blogs
-    )
-    print(f"  Total: {len(all_articles)} articles collected")
-
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
-    print("\nStep 2/4 — Claude Haiku: curating top 5 (distinct sources)...")
-    results = curate_five(client, {
-        "reddit": reddit,
-        "google": google,
-        "new":    linkedin_rss + pinterest + youtube,
-        "other":  medium + blogs,
-        "all":    all_articles,
-    })
-    print(f"  {len(results)} articles selected")
-
-    if not results:
-        print("No articles available. Exiting.")
-        return
-
-    web_url = None
-
-    print("\nStep 3/4 — MailerLite full newsletter...")
-    try:
-        html = build_newsletter_html(results)
-        web_url = send_to_mailerlite(html, results)
-    except Exception as e:
-        print(f"  MailerLite step failed: {e}")
-
-    print("\nStep 4/4 — LinkedIn trailer draft to Gmail...")
-    try:
-        txt = build_linkedin_txt(client, results, web_url)
-        email_linkedin_txt(txt, web_url)
-    except Exception as e:
-        print(f"  LinkedIn step failed: {e}")
-
-    print("\nDone!")
+    print("\n=== CAMPAIGN LANGUAGES ===")
+    l = requests.get("https://connect.mailerlite.com/api/campaigns/languages", headers=headers, timeout=30)
+    print(l.status_code)
+    langs = l.json().get("data", [])
+    for lang in langs[:10]:
+        print(f"  id={lang.get('id')}  name={lang.get('name')}  code={lang.get('shortcode')}")
 
 
 if __name__ == "__main__":
