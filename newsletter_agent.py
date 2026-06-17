@@ -4,6 +4,8 @@ import requests
 import os
 import re
 import time
+import json
+import random
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -15,18 +17,18 @@ from bs4 import BeautifulSoup
 
 NEWSLETTER_NAME    = "Scope Creep"
 NEWSLETTER_TAGLINE = "Top 5 product management reads, curated by AI. Fresh every Sunday."
-START_DATE         = datetime(2026, 4, 30)
+START_DATE         = datetime(2026, 6, 21)   # Issue #1 launches this Sunday
 
-# Your MailerLite group ID (confirmed from your account)
-MAILERLITE_GROUP_ID = "190360180433618205"
-
-# IMPORTANT: must be the sender email you VERIFIED in MailerLite
-# (MailerLite dashboard, Settings, Sender identities / Domains)
+MAILERLITE_GROUP_ID   = "190360180433618205"
 MAILERLITE_FROM_EMAIL = "mukherjee.koushik89@gmail.com"
 MAILERLITE_FROM_NAME  = "Koushik Mukherjee"
+MAILERLITE_SUBSCRIBE_URL = "https://dashboard.mailerlite.com/forms/190360336721774303/content"
 
-# IMPORTANT: replace with your published MailerLite landing-page URL once created
-MAILERLITE_SUBSCRIBE_URL = "https://preview.mailerlite.io/forms/2446886/190360336721774303/share"
+# Meme bank (public repo raw URLs)
+GITHUB_RAW_BASE   = "https://raw.githubusercontent.com/koushikm1989/pm-newsletter-agent/main/memes"
+MEME_HISTORY_FILE = "meme_history.json"
+MEME_HISTORY_DAYS = 56  # don't repeat a meme within 8 weeks
+
 
 def get_issue_number() -> int:
     weeks_since_start = ((datetime.now() - START_DATE).days // 7) + 1
@@ -92,7 +94,14 @@ YOUTUBE_HANDLES = [
     "@hellopm",
 ]
 
-# ── POOL METADATA (vibrant aurora palette) ───────────────────────────────────
+# Subreddits scanned for a FRESH meme each week
+MEME_SUBREDDIT_FEEDS = [
+    "https://www.reddit.com/r/ProductManagement/.rss",
+    "https://www.reddit.com/r/AIDankmemes/.rss",
+    "https://www.reddit.com/r/ProgrammerHumor/.rss",
+]
+
+# ── POOL METADATA ─────────────────────────────────────────────────────────────
 
 POOL_META = {
     "Reddit":      {"color": "#FF4500", "grad": "#FF6B35", "emoji": "👾", "bg": "#FFF3F0", "light": "#FFE0D6"},
@@ -123,6 +132,8 @@ HEADERS = {
     )
 }
 FEEDPARSER_AGENT = HEADERS["User-Agent"]
+
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 
 
 def strip_emdashes(text: str) -> str:
@@ -172,7 +183,7 @@ def extract_image(entry) -> str:
     if hasattr(entry, "media_content") and entry.media_content:
         for m in entry.media_content:
             if m.get("type", "").startswith("image") or \
-               m.get("url", "").endswith((".jpg", ".png", ".webp")):
+               m.get("url", "").endswith(IMAGE_EXTS):
                 return m.get("url")
     if hasattr(entry, "enclosures") and entry.enclosures:
         for enc in entry.enclosures:
@@ -316,7 +327,167 @@ def fetch_blogs(urls: list[str]) -> list[dict]:
     return articles[:10]
 
 
-# ── CLAUDE ────────────────────────────────────────────────────────────────────
+# ── MEME LOGIC ────────────────────────────────────────────────────────────────
+
+def load_recent_meme_ids() -> set:
+    if not os.path.exists(MEME_HISTORY_FILE):
+        return set()
+    try:
+        with open(MEME_HISTORY_FILE, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except Exception:
+        return set()
+    cutoff = (datetime.now() - timedelta(days=MEME_HISTORY_DAYS)).strftime("%Y-%m-%d")
+    return {e["id"] for e in history if e.get("date", "") >= cutoff}
+
+
+def save_meme_id(meme_id: str):
+    history = []
+    if os.path.exists(MEME_HISTORY_FILE):
+        try:
+            with open(MEME_HISTORY_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+    cutoff = (datetime.now() - timedelta(days=MEME_HISTORY_DAYS)).strftime("%Y-%m-%d")
+    history = [e for e in history if e.get("date", "") >= cutoff]
+    history.append({"date": datetime.now().strftime("%Y-%m-%d"), "id": meme_id})
+    try:
+        with open(MEME_HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2)
+    except Exception as e:
+        print(f"  Could not write meme history: {e}")
+
+
+def list_bank_memes() -> list[str]:
+    if not os.path.isdir("memes"):
+        return []
+    return [
+        f for f in os.listdir("memes")
+        if f.lower().endswith(IMAGE_EXTS) and not f.startswith(".")
+    ]
+
+
+def fetch_meme_candidates() -> list[dict]:
+    """Scan meme subreddits for image posts."""
+    candidates = []
+    cutoff = datetime.now() - timedelta(hours=72)
+    for url in MEME_SUBREDDIT_FEEDS:
+        try:
+            feed = feedparser.parse(url, agent=FEEDPARSER_AGENT)
+            for entry in feed.entries[:15]:
+                try:
+                    published = datetime(*entry.published_parsed[:6])
+                    if published < cutoff:
+                        continue
+                except Exception:
+                    pass
+                img = extract_image(entry)
+                if not img:
+                    continue
+                low = img.lower()
+                # keep only true image hosts that render in email
+                if ("i.redd.it" in low or "imgur" in low
+                        or low.endswith(IMAGE_EXTS)):
+                    candidates.append({
+                        "title":  entry.get("title", "").strip(),
+                        "image":  img,
+                        "link":   entry.get("link", "").strip(),
+                        "source": feed.feed.get("title", url),
+                    })
+        except Exception as e:
+            print(f"  Meme RSS error ({url}): {e}")
+    return candidates
+
+
+def pick_live_meme(client, candidates, recent_ids) -> dict:
+    """Ask Claude to pick the best on-brand meme, or return None."""
+    fresh = [c for c in candidates if c["link"] not in recent_ids]
+    if not fresh:
+        return None
+
+    listing = "\n".join([
+        f"[{i+1}] {c['title']}" for i, c in enumerate(fresh[:20])
+    ])
+
+    prompt = f"""You are choosing one meme for a Product Management newsletter (audience: PMs, tech, AI professionals).
+
+Below are meme post titles scraped from meme subreddits. Pick the SINGLE best one that is:
+- Genuinely relevant to product management, tech, software, AI, or work/career humour
+- Clean and professional enough for a LinkedIn-adjacent PM audience
+- Actually funny, not low-effort
+
+If NONE of them are relevant and appropriate for a PM audience, respond with exactly: NONE
+
+Memes:
+{listing}
+
+Respond with ONLY the number of your pick (e.g. "3"), or "NONE". Nothing else."""
+
+    try:
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=10,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        ans = msg.content[0].text.strip()
+    except Exception as e:
+        print(f"  Meme pick error: {e}")
+        return None
+
+    if ans.upper().startswith("NONE"):
+        return None
+    m = re.search(r"\d+", ans)
+    if not m:
+        return None
+    idx = int(m.group()) - 1
+    if 0 <= idx < len(fresh):
+        return fresh[idx]
+    return None
+
+
+def select_meme(client) -> dict:
+    """
+    Returns dict:
+      {image, caption, credit, id, mode}  where mode is 'live' or 'bank' or None
+    """
+    recent_ids = load_recent_meme_ids()
+
+    # 1) Try a fresh, on-brand meme from Reddit
+    candidates = fetch_meme_candidates()
+    print(f"  Meme candidates found: {len(candidates)}")
+    live = pick_live_meme(client, candidates, recent_ids)
+    if live:
+        print(f"  Live meme selected: {live['title'][:60]}")
+        return {
+            "image":   live["image"],
+            "caption": live["title"],
+            "credit":  f"via {live['source']}",
+            "id":      live["link"],
+            "mode":    "live",
+        }
+
+    # 2) Fall back to the meme bank (avoid recently used)
+    bank = list_bank_memes()
+    if bank:
+        bank_ids = [f"bank:{f}" for f in bank]
+        unused = [f for f in bank if f"bank:{f}" not in recent_ids]
+        choice = random.choice(unused if unused else bank)
+        print(f"  Bank meme selected: {choice}")
+        return {
+            "image":   f"{GITHUB_RAW_BASE}/{choice}",
+            "caption": "Meme of the week",
+            "credit":  "from the Scope Creep meme vault",
+            "id":      f"bank:{choice}",
+            "mode":    "bank",
+        }
+
+    # 3) Nothing available at all
+    print("  No meme available (no live candidate and empty bank).")
+    return {"image": None, "caption": "", "credit": "", "id": None, "mode": None}
+
+
+# ── CLAUDE (articles) ─────────────────────────────────────────────────────────
 
 def call_claude(client, prompt: str, max_tokens: int):
     for attempt in range(3):
@@ -377,11 +548,9 @@ SUMMARY:
     message = call_claude(client, prompt, 700)
     text = message.content[0].text
 
-    # Extract and validate the summary before accepting the pick
     summary_match = re.search(r"SUMMARY:\s*\n([\s\S]+?)(?:\n---|\Z)", text)
     summary = summary_match.group(1).strip() if summary_match else ""
 
-    # Reject incomplete summaries: must be long enough and end on a real sentence
     words = summary.split()
     ends_clean = summary.rstrip().endswith((".", "!", "?"))
     if len(words) < 25 or not ends_clean:
@@ -398,7 +567,6 @@ SUMMARY:
 
 
 def curate_five(client, all_pools: dict) -> list[dict]:
-    """Pick 5 articles, each from a DISTINCT source type (pool)."""
     results      = []
     picked_links = set()
     used_pools   = set()
@@ -422,7 +590,6 @@ def curate_five(client, all_pools: dict) -> list[dict]:
         if len(results) >= 5:
             break
         cands = candidates_from(pool)
-        # Try up to 3 times within this pool if summaries come back incomplete
         for _ in range(3):
             if not cands:
                 break
@@ -432,7 +599,6 @@ def curate_five(client, all_pools: dict) -> list[dict]:
                 picked_links.add(result["article"]["link"])
                 used_pools.add(result["article"].get("pool"))
                 break
-            # Rejected: drop the first candidate and retry with the rest
             cands = cands[1:]
 
     if len(results) < 5:
@@ -458,7 +624,7 @@ def curate_five(client, all_pools: dict) -> list[dict]:
 
 # ── MAILERLITE HTML — VIBRANT AURORA DESIGN ──────────────────────────────────
 
-def build_newsletter_html(results: list[dict]) -> str:
+def build_newsletter_html(results: list[dict], meme: dict) -> str:
     date_str = datetime.now().strftime("%B %d, %Y")
     issue    = get_issue_number()
     day_name = datetime.now().strftime("%A")
@@ -471,7 +637,6 @@ def build_newsletter_html(results: list[dict]) -> str:
         meta     = POOL_META.get(pool, POOL_META["Unknown"])
         color    = meta["color"]
         grad     = meta["grad"]
-        bg       = meta["bg"]
         light    = meta["light"]
 
         sec_emoji, sec_label, sec_sub = SECTION_LABELS[i] \
@@ -498,8 +663,7 @@ def build_newsletter_html(results: list[dict]) -> str:
         cards.append(f"""
 <table width="100%" cellpadding="0" cellspacing="0"
        style="margin-bottom:36px;border-radius:22px;overflow:hidden;
-              background:#ffffff;
-              box-shadow:0 12px 40px rgba(15,23,42,0.18);">
+              background:#ffffff;box-shadow:0 12px 40px rgba(15,23,42,0.18);">
   <tr>
     <td style="background:linear-gradient(100deg,{color} 0%,{grad} 100%);
                padding:16px 30px;">
@@ -537,18 +701,16 @@ def build_newsletter_html(results: list[dict]) -> str:
             <h2 style="font-family:Georgia,serif;margin:0;font-size:24px;
                        line-height:1.3;font-weight:700;color:#0F172A;">
               <a href="{article['link']}" target="_blank"
-                 style="color:#0F172A;text-decoration:none;">
-                {article['title']}
-              </a>
+                 style="color:#0F172A;text-decoration:none;">{article['title']}</a>
             </h2>
           </td>
         </tr>
         <tr>
           <td style="padding-bottom:20px;">
             <span style="font-family:Arial,sans-serif;display:inline-block;
-                         background:{light};color:{color};
-                         font-size:11px;font-weight:800;padding:5px 14px;
-                         border-radius:8px;letter-spacing:0.4px;">
+                         background:{light};color:{color};font-size:11px;
+                         font-weight:800;padding:5px 14px;border-radius:8px;
+                         letter-spacing:0.4px;">
               {source_label}
             </span>
           </td>
@@ -570,9 +732,9 @@ def build_newsletter_html(results: list[dict]) -> str:
                   <a href="{article['link']}" target="_blank"
                      style="font-family:'Trebuchet MS',Arial,sans-serif;
                             display:inline-block;color:#ffffff !important;
-                            font-size:14px;font-weight:800;
-                            padding:14px 30px;text-decoration:none;
-                            border-radius:12px;letter-spacing:0.4px;">
+                            font-size:14px;font-weight:800;padding:14px 30px;
+                            text-decoration:none;border-radius:12px;
+                            letter-spacing:0.4px;">
                     Read Full Article &rarr;
                   </a>
                 </td>
@@ -587,13 +749,54 @@ def build_newsletter_html(results: list[dict]) -> str:
 
     cards_html = "\n".join(cards)
 
+    # ── Meme of the week card ─────────────────────────────────────────────────
+    meme_html = ""
+    if meme and meme.get("image"):
+        caption = strip_emdashes(meme.get("caption", ""))[:140]
+        credit  = meme.get("credit", "")
+        meme_html = f"""
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="margin-bottom:36px;border-radius:22px;overflow:hidden;
+              background:#ffffff;box-shadow:0 12px 40px rgba(15,23,42,0.18);">
+  <tr>
+    <td style="background:linear-gradient(100deg,#F59E0B 0%,#FF4500 100%);
+               padding:16px 30px;">
+      <span style="font-family:'Trebuchet MS',Arial,sans-serif;color:#ffffff;
+                   font-size:12px;font-weight:800;letter-spacing:2.5px;
+                   text-transform:uppercase;">😂&nbsp;&nbsp;MEME OF THE WEEK</span><br>
+      <span style="font-family:'Trebuchet MS',Arial,sans-serif;
+                   color:rgba(255,255,255,0.85);font-size:11px;">
+        Because every PM week needs one
+      </span>
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:0;line-height:0;">
+      <img src="{meme['image']}" width="100%"
+           style="display:block;width:100%;max-height:520px;
+                  object-fit:contain;background:#0F172A;" alt="Meme of the week">
+    </td>
+  </tr>
+  <tr>
+    <td style="padding:18px 30px 24px;text-align:center;">
+      <p style="font-family:Georgia,serif;margin:0 0 6px;font-size:15px;
+                line-height:1.5;color:#334155;font-style:italic;">
+        {caption}
+      </p>
+      <p style="font-family:Arial,sans-serif;margin:0;font-size:11px;color:#94A3B8;">
+        {credit}
+      </p>
+    </td>
+  </tr>
+</table>"""
+
     pills = "".join([
         f'<span style="font-family:Arial,sans-serif;display:inline-block;'
         f'background:linear-gradient(100deg,'
         f'{POOL_META.get(r["article"].get("pool","Unknown"),POOL_META["Unknown"])["color"]},'
         f'{POOL_META.get(r["article"].get("pool","Unknown"),POOL_META["Unknown"])["grad"]});'
-        f'color:#ffffff;font-size:12px;font-weight:700;'
-        f'padding:6px 16px;border-radius:20px;margin:4px 5px;">'
+        f'color:#ffffff;font-size:12px;font-weight:700;padding:6px 16px;'
+        f'border-radius:20px;margin:4px 5px;">'
         f'{POOL_META.get(r["article"].get("pool","Unknown"),POOL_META["Unknown"])["emoji"]} '
         f'{r["article"].get("pool","Unknown")}</span>'
         for r in results
@@ -607,7 +810,6 @@ def build_newsletter_html(results: list[dict]) -> str:
 <title>{NEWSLETTER_NAME} — Issue #{issue}</title>
 </head>
 <body style="margin:0;padding:0;
-             background:#0B1020;
              background:linear-gradient(160deg,#0B1020 0%,#1A1442 40%,#2D1B5E 70%,#0B1020 100%);">
 <table width="100%" cellpadding="0" cellspacing="0"
        style="background:linear-gradient(160deg,#0B1020 0%,#1A1442 40%,#2D1B5E 70%,#0B1020 100%);">
@@ -643,8 +845,7 @@ def build_newsletter_html(results: list[dict]) -> str:
                   </h1>
                   <p style="font-family:'Trebuchet MS',Arial,sans-serif;
                              margin:0 0 26px;color:#C7D2FE;font-size:16px;
-                             line-height:1.6;max-width:440px;
-                             display:inline-block;">
+                             line-height:1.6;max-width:440px;display:inline-block;">
                     {NEWSLETTER_TAGLINE}
                   </p><br>
                   <div style="display:inline-block;height:3px;width:80px;
@@ -684,15 +885,14 @@ def build_newsletter_html(results: list[dict]) -> str:
                      border-radius:18px;padding:26px 30px;
                      border-left:6px solid #F59E0B;">
             <p style="font-family:Georgia,serif;margin:0 0 10px;
-                       font-size:19px;line-height:1.5;color:#1F2937;
-                       font-weight:700;">
+                       font-size:19px;line-height:1.5;color:#1F2937;font-weight:700;">
               Hey there! Welcome to this week's Scope Creep. 👋
             </p>
             <p style="font-family:Georgia,serif;margin:0;
                        font-size:16px;line-height:1.75;color:#475569;">
               Your weekly dose of the best product management reads,
               handpicked by AI and curated for PM professionals.
-              Here are your top 5 for this week.
+              Here are your top 5 for this week, with a meme to close us out.
             </p>
           </td>
         </tr>
@@ -701,10 +901,11 @@ def build_newsletter_html(results: list[dict]) -> str:
 
         <tr><td>{cards_html}</td></tr>
 
+        <tr><td>{meme_html}</td></tr>
+
         <tr>
           <td style="border-radius:22px;overflow:hidden;
-                     background:linear-gradient(135deg,
-                       #7C3AED 0%,#E60080 55%,#FF4500 100%);
+                     background:linear-gradient(135deg,#7C3AED 0%,#E60080 55%,#FF4500 100%);
                      padding:3px;">
             <table width="100%" cellpadding="0" cellspacing="0"
                    style="background:linear-gradient(150deg,#14102E,#241654);
@@ -734,9 +935,9 @@ def build_newsletter_html(results: list[dict]) -> str:
                         <a href="{MAILERLITE_SUBSCRIBE_URL}" target="_blank"
                            style="font-family:'Trebuchet MS',Arial,sans-serif;
                                   display:inline-block;color:#0F172A !important;
-                                  font-size:15px;font-weight:800;
-                                  padding:16px 38px;text-decoration:none;
-                                  border-radius:14px;letter-spacing:0.4px;">
+                                  font-size:15px;font-weight:800;padding:16px 38px;
+                                  text-decoration:none;border-radius:14px;
+                                  letter-spacing:0.4px;">
                           Subscribe to Scope Creep &rarr;
                         </a>
                       </td>
@@ -758,8 +959,7 @@ def build_newsletter_html(results: list[dict]) -> str:
             </p>
             <p style="font-family:Arial,sans-serif;color:#64748B;
                        font-size:11px;margin:0;line-height:1.8;">
-              Pioneered by Koushik &nbsp;&middot;&nbsp;
-              Curated by AI &nbsp;&middot;&nbsp;
+              Pioneered by Koushik &nbsp;&middot;&nbsp; Curated by AI &nbsp;&middot;&nbsp;
               Powered by Claude Haiku &amp; MailerLite &nbsp;&middot;&nbsp;
               Built on GitHub Actions
             </p>
@@ -774,7 +974,7 @@ def build_newsletter_html(results: list[dict]) -> str:
 </html>"""
 
 
-# ── MAILERLITE API ────────────────────────────────────────────────────────────
+# ── MAILERLITE API (DRAFT ONLY) ──────────────────────────────────────────────
 
 def _ml_headers():
     return {
@@ -784,40 +984,18 @@ def _ml_headers():
     }
 
 
-def get_campaign_webview(campaign_id: str) -> str:
-    try:
-        resp = requests.get(
-            f"https://connect.mailerlite.com/api/campaigns/{campaign_id}",
-            headers=_ml_headers(), timeout=30,
-        )
-        if resp.status_code != 200:
-            return None
-        data = resp.json().get("data", {})
-        for key in ("webview_url", "webview_link", "preview_url", "url"):
-            if data.get(key):
-                return data[key]
-        emails = data.get("emails") or []
-        if emails and isinstance(emails, list):
-            for key in ("webview_url", "webview_link", "preview_url", "url"):
-                if emails[0].get(key):
-                    return emails[0][key]
-    except Exception as e:
-        print(f"  Could not fetch web-view URL: {e}")
-    return None
-
-
-def send_to_mailerlite(html: str, results: list[dict]) -> str:
+def create_mailerlite_draft(html: str, results: list[dict]) -> str:
+    """Create a DRAFT campaign only. Never auto-sends. Returns campaign_id."""
     issue    = get_issue_number()
     date_str = datetime.now().strftime("%B %d, %Y")
     subject  = f"{NEWSLETTER_NAME} #{issue} | Top {len(results)} PM Reads | {date_str}"
-    preview  = ", ".join([r["article"]["title"][:40] for r in results[:3]])
 
     from_email = MAILERLITE_FROM_EMAIL.strip()
     if not from_email or "@" not in from_email:
-        print("  ERROR: MAILERLITE_FROM_EMAIL is not a valid email.")
+        print("  ERROR: MAILERLITE_FROM_EMAIL is not valid.")
         return None
 
-    campaign_payload = {
+    payload = {
         "type":        "regular",
         "name":        f"Scope Creep #{issue} - {date_str}",
         "language_id": 4,
@@ -832,41 +1010,24 @@ def send_to_mailerlite(html: str, results: list[dict]) -> str:
         "groups": [str(MAILERLITE_GROUP_ID)],
     }
 
-    create_resp = requests.post(
+    resp = requests.post(
         "https://connect.mailerlite.com/api/campaigns",
-        headers=_ml_headers(), json=campaign_payload, timeout=30,
+        headers=_ml_headers(), json=payload, timeout=30,
     )
-    if create_resp.status_code not in (200, 201):
-        print(f"  MailerLite create error {create_resp.status_code}: {create_resp.text}")
+    if resp.status_code not in (200, 201):
+        print(f"  MailerLite create error {resp.status_code}: {resp.text}")
         return None
 
-    campaign_id = create_resp.json()["data"]["id"]
-    print(f"  Campaign created. ID: {campaign_id}")
-
-    schedule_resp = requests.post(
-        f"https://connect.mailerlite.com/api/campaigns/{campaign_id}/schedule",
-        headers=_ml_headers(), json={"delivery": "instant"}, timeout=30,
-    )
-    if schedule_resp.status_code in (200, 201):
-        print(f"  Campaign scheduled for instant delivery.")
-        print(f"  Subject: {subject}")
-    else:
-        print(f"  MailerLite schedule error {schedule_resp.status_code}: {schedule_resp.text}")
-        print("  (Campaign exists as a draft. If your account isn't approved for")
-        print("   sending yet, open it in MailerLite and send manually.)")
-
-    time.sleep(5)
-    web_url = get_campaign_webview(campaign_id)
-    if web_url:
-        print(f"  Web version: {web_url}")
-    else:
-        print("  Web version URL not available yet (appears once the send completes).")
-    return web_url
+    campaign_id = resp.json()["data"]["id"]
+    print(f"  Draft campaign created. ID: {campaign_id}")
+    print(f"  Subject: {subject}")
+    print("  NOTE: This is a DRAFT. Review and send manually from MailerLite.")
+    return campaign_id
 
 
-# ── LINKEDIN TRAILER (.txt, paste-ready) ──────────────────────────────────────
+# ── LINKEDIN TRAILER + NOTIFICATION EMAIL ────────────────────────────────────
 
-def build_linkedin_txt(client, results: list[dict], web_url: str = None) -> str:
+def build_linkedin_txt(client, results: list[dict]) -> str:
     issue    = get_issue_number()
     date_str = datetime.now().strftime("%B %d, %Y")
 
@@ -881,14 +1042,14 @@ def build_linkedin_txt(client, results: list[dict], web_url: str = None) -> str:
     prompt = f"""You are writing a LinkedIn newsletter "trailer" in the voice of Koushik Mukherjee, a Lead Product Owner (B2B SaaS).
 
 Today: {date_str}. This is the LinkedIn companion to Scope Creep, a full email newsletter.
-Its job: hook PM readers with ONE article unpacked in full, tease the rest, and drive them to subscribe to the full email edition.
+Its job: hook PM readers with ONE article unpacked in full, tease the rest, and drive them to subscribe.
 
 This week's 5 curated articles:
 
 {listing}
 
 TASKS:
-1. Choose the SINGLE most compelling article to expand (sharpest, most debate-worthy for a PM audience).
+1. Choose the SINGLE most compelling article to expand.
 2. Write a punchy HEADLINE for it.
 3. Write a DEEPDIVE of 150 to 220 words in Koushik's voice:
    - Bold one-line thesis to open, often a contrast.
@@ -901,7 +1062,7 @@ TASKS:
 VOICE RULES:
 - First person, personal, optimistic, principled.
 - NEVER use em dashes or en dashes. Use commas and full stops.
-- No corporate jargon. Short sentences. No long hyphenated phrases.
+- No corporate jargon. Short sentences.
 
 Respond in EXACTLY this format and nothing else:
 
@@ -923,10 +1084,8 @@ TEASERS:
         expand_idx = 1
 
     headline_m = re.search(r"HEADLINE:\s*(.+)", raw)
-    headline   = (
-        headline_m.group(1).strip().replace("*", "")
-        if headline_m else results[expand_idx - 1]["article"]["title"]
-    )
+    headline   = (headline_m.group(1).strip().replace("*", "")
+                  if headline_m else results[expand_idx - 1]["article"]["title"])
 
     deepdive_m = re.search(r"DEEPDIVE:\s*\n([\s\S]+?)\nTEASERS:", raw)
     deepdive   = deepdive_m.group(1).strip() if deepdive_m else ""
@@ -938,15 +1097,9 @@ TEASERS:
     hr       = "━" * 24
 
     lines = []
-    lines.append(
-        f"{to_unicode_bold(NEWSLETTER_NAME)}"
-        f"   \u2022   Issue #{issue}   \u2022   {date_str}"
-    )
+    lines.append(f"{to_unicode_bold(NEWSLETTER_NAME)}   \u2022   Issue #{issue}   \u2022   {date_str}")
     lines.append("")
-    lines.append(
-        "Your weekly trailer. The 5 best product reads of the week, "
-        "with one unpacked in full below."
-    )
+    lines.append("Your weekly trailer. The 5 best product reads of the week, with one unpacked in full below.")
     lines.append("")
     lines.append(hr)
     lines.append("")
@@ -975,23 +1128,15 @@ TEASERS:
         lines.append("")
     lines.append(hr)
     lines.append("")
-    if web_url:
-        lines.append("📖 " + to_unicode_bold("Read the full edition online:"))
-        lines.append(web_url)
-        lines.append("")
     lines.append(to_unicode_bold("Get all 5, every Sunday."))
-    lines.append(
-        "The full edition lands in your inbox each week. "
-        "Subscribe to Scope Creep, free:"
-    )
+    lines.append("The full edition lands in your inbox each week. Subscribe to Scope Creep, free:")
     lines.append(MAILERLITE_SUBSCRIBE_URL)
     lines.append("")
     lines.append("#ProductManagement #AI #Newsletter #ScopeCreep #BuildInPublic")
-
     return "\n".join(lines)
 
 
-def email_linkedin_txt(txt_content: str, web_url: str = None):
+def email_linkedin_txt(txt_content: str, meme: dict, campaign_id: str):
     sender    = os.environ["GMAIL_ADDRESS"]
     password  = os.environ["GMAIL_APP_PASSWORD"]
     recipient = os.environ["RECIPIENT_EMAIL"]
@@ -999,28 +1144,45 @@ def email_linkedin_txt(txt_content: str, web_url: str = None):
     date_str  = datetime.now().strftime("%b %d, %Y")
     filename  = f"scope_creep_linkedin_issue_{issue}.txt"
 
-    msg = MIMEMultipart()
-    msg["Subject"] = (
-        f"\u270D\uFE0F Scope Creep #{issue} "
-        f"| LinkedIn newsletter draft | {date_str}"
+    # Meme status line for the notification
+    mode = meme.get("mode") if meme else None
+    if mode == "live":
+        meme_status = (
+            "✅ MEME: A fresh meme was found from Reddit and added to the edition. "
+            "Please confirm it renders correctly in the MailerLite preview before sending.\n"
+        )
+    elif mode == "bank":
+        meme_status = (
+            "📦 MEME: No fresh meme was found this week, so one was pulled from your "
+            "meme bank. Review it in the MailerLite draft. If you want a different one, "
+            "swap the image in MailerLite before sending.\n"
+        )
+    else:
+        meme_status = (
+            "⚠️ MEME: NO meme was found and the meme bank is empty. The edition has NO "
+            "meme right now. Add a meme image to the MailerLite draft before sending, "
+            "or upload one to the memes folder for next time.\n"
+        )
+
+    flag = "⚠️ ACTION NEEDED " if mode != "live" else ""
+    subject_line = (
+        f"\u270D\uFE0F {flag}Scope Creep #{issue} | Draft ready for review | {date_str}"
     )
+
+    msg = MIMEMultipart()
+    msg["Subject"] = subject_line
     msg["From"] = sender
     msg["To"]   = recipient
 
-    web_line = (
-        f"This week's full edition is live online here:\n{web_url}\n\n"
-        if web_url else
-        "The full edition web link will appear in MailerLite once the send completes.\n\n"
-    )
-
+    cid = campaign_id or "(not created)"
     body = (
         f"Hi Koushik,\n\n"
-        f"Attached is your LinkedIn newsletter draft for Scope Creep #{issue}.\n\n"
-        "Open the .txt, copy everything, paste straight into the LinkedIn "
-        "newsletter editor. Unicode bold and bullets survive the paste cleanly.\n\n"
-        f"{web_line}"
-        "One article is unpacked in full. The other four are teasers pointing "
-        "readers to the full MailerLite edition so they subscribe.\n\n"
+        f"Scope Creep #{issue} is ready as a DRAFT in MailerLite. Nothing has been sent yet.\n\n"
+        f"{meme_status}\n"
+        f"To send: open MailerLite, go to Campaigns, find the draft (campaign ID {cid}), "
+        f"review it, and hit send when happy.\n\n"
+        "Attached is your LinkedIn trailer .txt. Copy it and paste straight into the "
+        "LinkedIn newsletter editor. Unicode bold and bullets survive the paste cleanly.\n\n"
         "Happy Sunday.\n"
     )
     msg.attach(MIMEText(body, "plain", "utf-8"))
@@ -1032,13 +1194,13 @@ def email_linkedin_txt(txt_content: str, web_url: str = None):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(sender, password)
         server.sendmail(sender, recipient, msg.as_string())
-    print(f"  LinkedIn draft emailed as {filename}")
+    print(f"  Notification + LinkedIn draft emailed (meme mode: {mode}).")
 
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 
 def main():
-    print("Step 1/4 — Fetching all sources...")
+    print("Step 1/5 — Fetching all sources...")
 
     reddit = fetch_rss(REDDIT_FEEDS)
     for a in reddit:
@@ -1069,14 +1231,12 @@ def main():
     blogs = fetch_blogs(BLOG_URLS)
     print(f"  Blogs: {len(blogs)}")
 
-    all_articles = (
-        reddit + google + linkedin_rss + pinterest + youtube + medium + blogs
-    )
+    all_articles = reddit + google + linkedin_rss + pinterest + youtube + medium + blogs
     print(f"  Total: {len(all_articles)} articles collected")
 
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-    print("\nStep 2/4 — Claude Haiku: curating top 5 (distinct sources)...")
+    print("\nStep 2/5 — Claude Haiku: curating top 5 (distinct sources)...")
     results = curate_five(client, {
         "reddit": reddit,
         "google": google,
@@ -1090,21 +1250,27 @@ def main():
         print("No articles available. Exiting.")
         return
 
-    web_url = None
+    print("\nStep 3/5 — Selecting the meme of the week...")
+    meme = select_meme(client)
 
-    print("\nStep 3/4 — MailerLite full newsletter...")
+    print("\nStep 4/5 — Building newsletter and creating MailerLite DRAFT...")
+    campaign_id = None
     try:
-        html = build_newsletter_html(results)
-        web_url = send_to_mailerlite(html, results)
+        html = build_newsletter_html(results, meme)
+        campaign_id = create_mailerlite_draft(html, results)
     except Exception as e:
         print(f"  MailerLite step failed: {e}")
 
-    print("\nStep 4/4 — LinkedIn trailer draft to Gmail...")
+    print("\nStep 5/5 — LinkedIn trailer + notification to Gmail...")
     try:
-        txt = build_linkedin_txt(client, results, web_url)
-        email_linkedin_txt(txt, web_url)
+        txt = build_linkedin_txt(client, results)
+        email_linkedin_txt(txt, meme, campaign_id)
     except Exception as e:
-        print(f"  LinkedIn step failed: {e}")
+        print(f"  Notification step failed: {e}")
+
+    # Record the meme so it isn't reused soon
+    if meme and meme.get("id"):
+        save_meme_id(meme["id"])
 
     print("\nDone!")
 
