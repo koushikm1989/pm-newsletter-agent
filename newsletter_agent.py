@@ -22,7 +22,7 @@ START_DATE         = datetime(2026, 6, 21)   # Issue #1 launches this Sunday
 MAILERLITE_GROUP_ID   = "190360180433618205"
 MAILERLITE_FROM_EMAIL = "mukherjee.koushik89@gmail.com"
 MAILERLITE_FROM_NAME  = "Koushik Mukherjee"
-MAILERLITE_SUBSCRIBE_URL = "https://dashboard.mailerlite.com/forms/190360336721774303/content"
+MAILERLITE_SUBSCRIBE_URL = "https://preview.mailerlite.io/forms/2446886/190360336721774303/share"
 
 # Meme bank (public repo raw URLs)
 GITHUB_RAW_BASE   = "https://raw.githubusercontent.com/koushikm1989/pm-newsletter-agent/main/memes"
