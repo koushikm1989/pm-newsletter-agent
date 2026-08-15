@@ -19,10 +19,9 @@ NEWSLETTER_NAME    = "Scope Creep"
 NEWSLETTER_TAGLINE = "Top 5 product management reads, curated by AI. Fresh every Sunday."
 START_DATE         = datetime(2026, 6, 21)   # Issue #1 launches this Sunday
 
-MAILERLITE_GROUP_ID   = "190360180433618205"
-MAILERLITE_FROM_EMAIL = "mukherjee.koushik89@gmail.com"
-MAILERLITE_FROM_NAME  = "Koushik Mukherjee"
-MAILERLITE_SUBSCRIBE_URL = "https://preview.mailerlite.io/forms/2446886/190360336721774303/share"
+# IMPORTANT: replace with your real Buttondown newsletter URL
+# (e.g. https://buttondown.com/scopecreep or your custom domain)
+BUTTONDOWN_SUBSCRIBE_URL = "https://buttondown.com/YOUR-USERNAME"
 
 # Meme bank (public repo raw URLs)
 GITHUB_RAW_BASE   = "https://raw.githubusercontent.com/koushikm1989/pm-newsletter-agent/main/memes"
@@ -369,7 +368,6 @@ def list_bank_memes() -> list[str]:
 
 
 def fetch_meme_candidates() -> list[dict]:
-    """Scan meme subreddits for image posts."""
     candidates = []
     cutoff = datetime.now() - timedelta(hours=72)
     for url in MEME_SUBREDDIT_FEEDS:
@@ -386,7 +384,6 @@ def fetch_meme_candidates() -> list[dict]:
                 if not img:
                     continue
                 low = img.lower()
-                # keep only true image hosts that render in email
                 if ("i.redd.it" in low or "imgur" in low
                         or low.endswith(IMAGE_EXTS)):
                     candidates.append({
@@ -401,7 +398,6 @@ def fetch_meme_candidates() -> list[dict]:
 
 
 def pick_live_meme(client, candidates, recent_ids) -> dict:
-    """Ask Claude to pick the best on-brand meme, or return None."""
     fresh = [c for c in candidates if c["link"] not in recent_ids]
     if not fresh:
         return None
@@ -447,13 +443,8 @@ Respond with ONLY the number of your pick (e.g. "3"), or "NONE". Nothing else.""
 
 
 def select_meme(client) -> dict:
-    """
-    Returns dict:
-      {image, caption, credit, id, mode}  where mode is 'live' or 'bank' or None
-    """
     recent_ids = load_recent_meme_ids()
 
-    # 1) Try a fresh, on-brand meme from Reddit
     candidates = fetch_meme_candidates()
     print(f"  Meme candidates found: {len(candidates)}")
     live = pick_live_meme(client, candidates, recent_ids)
@@ -467,10 +458,8 @@ def select_meme(client) -> dict:
             "mode":    "live",
         }
 
-    # 2) Fall back to the meme bank (avoid recently used)
     bank = list_bank_memes()
     if bank:
-        bank_ids = [f"bank:{f}" for f in bank]
         unused = [f for f in bank if f"bank:{f}" not in recent_ids]
         choice = random.choice(unused if unused else bank)
         print(f"  Bank meme selected: {choice}")
@@ -482,7 +471,6 @@ def select_meme(client) -> dict:
             "mode":    "bank",
         }
 
-    # 3) Nothing available at all
     print("  No meme available (no live candidate and empty bank).")
     return {"image": None, "caption": "", "credit": "", "id": None, "mode": None}
 
@@ -622,7 +610,7 @@ def curate_five(client, all_pools: dict) -> list[dict]:
     return results
 
 
-# ── MAILERLITE HTML — VIBRANT AURORA DESIGN ──────────────────────────────────
+# ── NEWSLETTER HTML — VIBRANT AURORA DESIGN ──────────────────────────────────
 
 def build_newsletter_html(results: list[dict], meme: dict) -> str:
     date_str = datetime.now().strftime("%B %d, %Y")
@@ -749,7 +737,6 @@ def build_newsletter_html(results: list[dict], meme: dict) -> str:
 
     cards_html = "\n".join(cards)
 
-    # ── Meme of the week card ─────────────────────────────────────────────────
     meme_html = ""
     if meme and meme.get("image"):
         caption = strip_emdashes(meme.get("caption", ""))[:140]
@@ -802,7 +789,8 @@ def build_newsletter_html(results: list[dict], meme: dict) -> str:
         for r in results
     ])
 
-    return f"""<!DOCTYPE html>
+    return f"""<!-- buttondown-editor-mode: fancy -->
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -932,7 +920,7 @@ def build_newsletter_html(results: list[dict], meme: dict) -> str:
                     <tr>
                       <td style="background:linear-gradient(100deg,#FBBF24,#F59E0B);
                                  border-radius:14px;">
-                        <a href="{MAILERLITE_SUBSCRIBE_URL}" target="_blank"
+                        <a href="{BUTTONDOWN_SUBSCRIBE_URL}" target="_blank"
                            style="font-family:'Trebuchet MS',Arial,sans-serif;
                                   display:inline-block;color:#0F172A !important;
                                   font-size:15px;font-weight:800;padding:16px 38px;
@@ -960,7 +948,7 @@ def build_newsletter_html(results: list[dict], meme: dict) -> str:
             <p style="font-family:Arial,sans-serif;color:#64748B;
                        font-size:11px;margin:0;line-height:1.8;">
               Pioneered by Koushik &nbsp;&middot;&nbsp; Curated by AI &nbsp;&middot;&nbsp;
-              Powered by Claude Haiku &amp; MailerLite &nbsp;&middot;&nbsp;
+              Powered by Claude Haiku &amp; Buttondown &nbsp;&middot;&nbsp;
               Built on GitHub Actions
             </p>
           </td>
@@ -974,55 +962,38 @@ def build_newsletter_html(results: list[dict], meme: dict) -> str:
 </html>"""
 
 
-# ── MAILERLITE API (DRAFT ONLY) ──────────────────────────────────────────────
+# ── BUTTONDOWN API (DRAFT ONLY) ──────────────────────────────────────────────
 
-def _ml_headers():
-    return {
-        "Authorization": f"Bearer {os.environ['MAILERLITE_API_KEY']}",
-        "Content-Type":  "application/json",
-        "Accept":        "application/json",
-    }
+def send_to_buttondown(html: str, results: list[dict]) -> dict:
+    """Create a DRAFT email in Buttondown. Never auto-sends. Returns response data or None."""
+    api_key = os.environ.get("BUTTONDOWN_API_KEY", "").strip()
+    if not api_key:
+        print("  ERROR: BUTTONDOWN_API_KEY is not set.")
+        return None
 
-
-def create_mailerlite_draft(html: str, results: list[dict]) -> str:
-    """Create a DRAFT campaign only. Never auto-sends. Returns campaign_id."""
     issue    = get_issue_number()
     date_str = datetime.now().strftime("%B %d, %Y")
     subject  = f"{NEWSLETTER_NAME} #{issue} | Top {len(results)} PM Reads | {date_str}"
 
-    from_email = MAILERLITE_FROM_EMAIL.strip()
-    if not from_email or "@" not in from_email:
-        print("  ERROR: MAILERLITE_FROM_EMAIL is not valid.")
-        return None
-
-    payload = {
-        "type":        "regular",
-        "name":        f"Scope Creep #{issue} - {date_str}",
-        "language_id": 4,
-        "emails": [
-            {
-                "subject":   subject,
-                "from_name": MAILERLITE_FROM_NAME,
-                "from":      from_email,
-                "content":   html,
-            }
-        ],
-        "groups": [str(MAILERLITE_GROUP_ID)],
-    }
-
     resp = requests.post(
-        "https://connect.mailerlite.com/api/campaigns",
-        headers=_ml_headers(), json=payload, timeout=30,
+        "https://api.buttondown.com/v1/emails",
+        headers={
+            "Authorization": f"Token {api_key}",
+            "Content-Type":  "application/json",
+        },
+        json={"subject": subject, "body": html, "status": "draft"},
+        timeout=30,
     )
-    if resp.status_code not in (200, 201):
-        print(f"  MailerLite create error {resp.status_code}: {resp.text}")
-        return None
 
-    campaign_id = resp.json()["data"]["id"]
-    print(f"  Draft campaign created. ID: {campaign_id}")
-    print(f"  Subject: {subject}")
-    print("  NOTE: This is a DRAFT. Review and send manually from MailerLite.")
-    return campaign_id
+    if resp.status_code in (200, 201):
+        data = resp.json()
+        print(f"  Draft email created. ID: {data.get('id')}")
+        print(f"  Subject: {subject}")
+        print("  NOTE: This is a DRAFT. Review and send manually from Buttondown.")
+        return data
+
+    print(f"  Buttondown API error {resp.status_code}: {resp.text}")
+    return None
 
 
 # ── LINKEDIN TRAILER + NOTIFICATION EMAIL ────────────────────────────────────
@@ -1130,13 +1101,13 @@ TEASERS:
     lines.append("")
     lines.append(to_unicode_bold("Get all 5, every Sunday."))
     lines.append("The full edition lands in your inbox each week. Subscribe to Scope Creep, free:")
-    lines.append(MAILERLITE_SUBSCRIBE_URL)
+    lines.append(BUTTONDOWN_SUBSCRIBE_URL)
     lines.append("")
     lines.append("#ProductManagement #AI #Newsletter #ScopeCreep #BuildInPublic")
     return "\n".join(lines)
 
 
-def email_linkedin_txt(txt_content: str, meme: dict, campaign_id: str):
+def email_linkedin_txt(txt_content: str, meme: dict, buttondown_data: dict):
     sender    = os.environ["GMAIL_ADDRESS"]
     password  = os.environ["GMAIL_APP_PASSWORD"]
     recipient = os.environ["RECIPIENT_EMAIL"]
@@ -1144,43 +1115,40 @@ def email_linkedin_txt(txt_content: str, meme: dict, campaign_id: str):
     date_str  = datetime.now().strftime("%b %d, %Y")
     filename  = f"scope_creep_linkedin_issue_{issue}.txt"
 
-    # Meme status line for the notification
     mode = meme.get("mode") if meme else None
     if mode == "live":
         meme_status = (
             "✅ MEME: A fresh meme was found from Reddit and added to the edition. "
-            "Please confirm it renders correctly in the MailerLite preview before sending.\n"
+            "Please confirm it renders correctly in the Buttondown preview before sending.\n"
         )
     elif mode == "bank":
         meme_status = (
             "📦 MEME: No fresh meme was found this week, so one was pulled from your "
-            "meme bank. Review it in the MailerLite draft. If you want a different one, "
-            "swap the image in MailerLite before sending.\n"
+            "meme bank. Review it in the Buttondown draft. If you want a different one, "
+            "swap the image in Buttondown before sending.\n"
         )
     else:
         meme_status = (
             "⚠️ MEME: NO meme was found and the meme bank is empty. The edition has NO "
-            "meme right now. Add a meme image to the MailerLite draft before sending, "
+            "meme right now. Add a meme image to the Buttondown draft before sending, "
             "or upload one to the memes folder for next time.\n"
         )
 
     flag = "⚠️ ACTION NEEDED " if mode != "live" else ""
-    subject_line = (
-        f"\u270D\uFE0F {flag}Scope Creep #{issue} | Draft ready for review | {date_str}"
-    )
+    subject_line = f"\u270D\uFE0F {flag}Scope Creep #{issue} | Draft ready for review | {date_str}"
 
     msg = MIMEMultipart()
     msg["Subject"] = subject_line
     msg["From"] = sender
     msg["To"]   = recipient
 
-    cid = campaign_id or "(not created)"
+    bd_id = buttondown_data.get("id") if buttondown_data else "(not created, check logs)"
     body = (
         f"Hi Koushik,\n\n"
-        f"Scope Creep #{issue} is ready as a DRAFT in MailerLite. Nothing has been sent yet.\n\n"
+        f"Scope Creep #{issue} is ready as a DRAFT in Buttondown. Nothing has been sent yet.\n\n"
         f"{meme_status}\n"
-        f"To send: open MailerLite, go to Campaigns, find the draft (campaign ID {cid}), "
-        f"review it, and hit send when happy.\n\n"
+        f"To send: log into Buttondown, go to Emails (draft ID {bd_id}), review it, "
+        f"and hit send when happy.\n\n"
         "Attached is your LinkedIn trailer .txt. Copy it and paste straight into the "
         "LinkedIn newsletter editor. Unicode bold and bullets survive the paste cleanly.\n\n"
         "Happy Sunday.\n"
@@ -1253,22 +1221,21 @@ def main():
     print("\nStep 3/5 — Selecting the meme of the week...")
     meme = select_meme(client)
 
-    print("\nStep 4/5 — Building newsletter and creating MailerLite DRAFT...")
-    campaign_id = None
+    print("\nStep 4/5 — Building newsletter and creating Buttondown DRAFT...")
+    buttondown_data = None
     try:
         html = build_newsletter_html(results, meme)
-        campaign_id = create_mailerlite_draft(html, results)
+        buttondown_data = send_to_buttondown(html, results)
     except Exception as e:
-        print(f"  MailerLite step failed: {e}")
+        print(f"  Buttondown step failed: {e}")
 
     print("\nStep 5/5 — LinkedIn trailer + notification to Gmail...")
     try:
         txt = build_linkedin_txt(client, results)
-        email_linkedin_txt(txt, meme, campaign_id)
+        email_linkedin_txt(txt, meme, buttondown_data)
     except Exception as e:
         print(f"  Notification step failed: {e}")
 
-    # Record the meme so it isn't reused soon
     if meme and meme.get("id"):
         save_meme_id(meme["id"])
 
