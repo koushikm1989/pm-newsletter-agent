@@ -21,7 +21,7 @@ START_DATE         = datetime(2026, 6, 21)   # Issue #1 launches this Sunday
 
 # IMPORTANT: replace with your real Buttondown newsletter URL
 # (e.g. https://buttondown.com/scopecreep or your custom domain)
-BUTTONDOWN_SUBSCRIBE_URL = "https://buttondown.com/YOUR-USERNAME"
+BUTTONDOWN_SUBSCRIBE_URL = "https://buttondown.com/koushik"
 
 # Meme bank (public repo raw URLs)
 GITHUB_RAW_BASE   = "https://raw.githubusercontent.com/koushikm1989/pm-newsletter-agent/main/memes"
